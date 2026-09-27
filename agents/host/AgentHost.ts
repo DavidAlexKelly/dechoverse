@@ -11,6 +11,7 @@ import { describeError } from "@/foundry/errors";
 import { CHARACTER_SCHEMA_VERSION, publishCharacter } from "@/foundry/streams/characters";
 import { CHAT_SCHEMA_VERSION, publishChat } from "@/foundry/streams/chat";
 import { MARK_SCHEMA_VERSION, type MarkRecord, publishMarks } from "@/foundry/streams/marks";
+import { estimateSpeechMs } from "@/game/state/speech";
 import {
   PRESENCE_SCHEMA_VERSION,
   type PresenceRecord,
@@ -74,11 +75,18 @@ const THINK_SCHEDULER_MS = 200;
 const MARK_FLUSH_MS = 2000;
 const NOTIFY_MS = 500;
 const LOG_LIMIT = 300;
+/**
+ * Pause after someone finishes speaking before an agent starts: long enough
+ * to read as listening, short enough that a conversation still flows.
+ */
+const SPEECH_GAP_MS = 2500;
 /** Never send more than this many poses in one presence batch. */
 const MAX_POSES_PER_BATCH = 80;
 
 export class AgentHost {
   private agents = new Map<string, Agent>();
+  /** Per room: when the last line heard or said will have finished, plus the gap. */
+  private floors = new Map<string, number>();
   /** Builds in progress, shared so one agent can help with another's. */
   private readonly projects = new ProjectBoard();
   private views = new Map<string, { view: WorldView; users: number }>();
@@ -331,6 +339,8 @@ export class AgentHost {
     spent: (dollars) => {
       this.spent += dollars;
     },
+    floorFreeAt: (levelKey) => this.floors.get(levelKey) ?? 0,
+    takeFloor: (levelKey, text) => this.extendFloor(levelKey, performance.now(), text),
     jevFatal: (message) => {
       // No credits or a bad key: every call will fail the same way, so stop
       // calling. Agents fall back to their heuristics until it is fixed.
@@ -419,9 +429,18 @@ export class AgentHost {
       return existing.view;
     }
     const view = new WorldView(levelKey, geometry);
+    // Anyone speaking in the room — a human, or an agent in another tab —
+    // holds the floor until they will have finished.
+    view.onChat((message) => this.extendFloor(levelKey, message.receivedAt, message.text));
     view.start();
     this.views.set(levelKey, { view, users: 1 });
     return view;
+  }
+
+  /** The floor is busy until `text`, started at `from`, has been spoken, plus the gap. */
+  private extendFloor(levelKey: string, from: number, text: string): void {
+    const until = from + estimateSpeechMs(text) + SPEECH_GAP_MS;
+    this.floors.set(levelKey, Math.max(this.floors.get(levelKey) ?? 0, until));
   }
 
   private releaseView(levelKey: string): void {
