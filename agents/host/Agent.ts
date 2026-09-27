@@ -53,6 +53,7 @@ import type { EyePose } from "@/agents/body/Body";
 import { HEARING_RADIUS, SHOUT_RADIUS } from "@/game/state/useChat";
 import { bubbleDurationMs, isShout } from "@/game/state/speech";
 import { cellKey as voxelKey, cellOf, hasCube } from "@/game/world/voxels";
+import { randomFloat } from "@/shared/random";
 
 /**
  * One AI player: a body in a room, a mind that decides, and the calls that
@@ -665,8 +666,11 @@ export class Agent {
     const geometry = this.view.geometry;
     let best: { x: number; z: number; score: number } | null = null;
     for (let attempt = 0; attempt < 8; attempt++) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = geometry.halfSize != null ? 3 + Math.random() * (geometry.halfSize - 4) : 12 + Math.random() * 28;
+      const angle = randomFloat() * Math.PI * 2;
+      const radius =
+        geometry.halfSize != null
+          ? 3 + randomFloat() * (geometry.halfSize - 4)
+          : 12 + randomFloat() * 28;
       const x = this.body.x + Math.cos(angle) * radius;
       const z = this.body.z + Math.sin(angle) * radius;
       if (geometry.halfSize != null && (Math.abs(x) > geometry.halfSize - 2 || Math.abs(z) > geometry.halfSize - 2)) {
