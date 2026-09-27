@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type CommandResult, type CommandRoom, runCommand } from "@/agents/commands/commands";
+import { logJevStatus } from "@/agents/brain/jevLog";
 import { storedJevKey, storedJevModel } from "@/agents/config/session";
 import { AgentHost } from "@/agents/host/AgentHost";
 import type { Pose } from "@/game/state/usePresence";
@@ -54,6 +55,11 @@ export function useAgentHost(
       const key = storedJevKey();
       if (key !== "") {
         created.configureJev(key, storedJevModel());
+      } else {
+        logJevStatus(
+          false,
+          'no key: VITE_OPENROUTER_API_KEY was empty in this build (restart the dev server / rebuild after editing .env) and none was typed with "jevkey <key>"',
+        );
       }
       let seenUpTo = Date.now();
       created.subscribe((snapshot) => {
