@@ -1,4 +1,5 @@
 import { createBrowserRouter } from "react-router-dom";
+import AgentConsole from "@/agents/host/AgentConsole";
 import AuthCallback from "@/app/AuthCallback";
 import Game from "@/game/Game";
 
@@ -12,6 +13,11 @@ export const router = createBrowserRouter(
     {
       path: "/fps",
       element: <Game />,
+    },
+    {
+      // Control panel for the AI players, who run in this tab while it is open
+      path: "/agents",
+      element: <AgentConsole />,
     },
     {
       // This is the route defined in your application's redirect URL

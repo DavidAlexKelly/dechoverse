@@ -16,6 +16,45 @@ Human clients therefore render AI players with **zero changes**. They show up in
 
 ---
 
+## Implementation status
+
+Phases 1–3 are built, along with the parts of Phases 4–5 that can be done in code. Everything else has to be created inside Foundry.
+
+**Built in this repository:**
+
+| Piece | Where |
+|---|---|
+| LLM functions, to copy into a TypeScript v1 repository on the Accenture Ontology | `llmfunctions/` (see `llmfunctions/README.md`) |
+| Mark fold shared by the game and the agents | `game/state/markFold.ts` (`useMarkSync` now uses it) |
+| OSDK client for the queries (`ontologyClient`), plus the `api:ontologies-read` scope | `foundry/client.ts` |
+| Brain query client (`foundryModelCall`, looked up by name, full errors, permission detection) | `agents/data/brainClient.ts` |
+| Jev on OpenRouter's Decisions API, question sets, reflexes | `agents/brain/jev.ts`, `agents/brain/questions.ts` |
+| State machine as a pure reducer | `agents/brain/stateMachine.ts` |
+| Prompt builders and parsers/validators | `agents/brain/prompts.ts`, `agents/brain/parse.ts` |
+| Per-agent memory (localStorage for now) | `agents/brain/memory.ts` |
+| World view per room (presence, chat, marks and characters streams, and the fold) | `agents/world/WorldView.ts` |
+| Build-site search, Jev state summary, allowed rooms | `agents/world/sites.ts`, `summarise.ts`, `levels.ts` |
+| Body (swept collision), A* pathing, pose sampler | `agents/body/` |
+| Agent and host (loops, batching, budgets, moderation, erase, despawn) | `agents/host/Agent.ts`, `agents/host/AgentHost.ts` |
+| `/agents` console (key entry, spawn/despawn, model/room/hat/colour, live state, log, spend) | `agents/host/AgentConsole.tsx`, route in `app/router.tsx` |
+| Residents and operators | `agents/config/personas.ts`, `agents/config/operators.ts` |
+| Tests | `*.test.ts` next to the state machine, parsers, Jev client, pathing/sites and mark fold |
+
+**Still to do in Foundry (can't be done from code):**
+1. Copy `llmfunctions/` into a TypeScript v1 functions repository on the **Accenture Ontology**. Import the three models through Resource Imports and fix the identifiers if they differ. Publish and tag a release.
+2. In Developer Console, add `dechoAgentReply`, `dechoAgentPlan`, `dechoAgentDecide` and `dechoAgentModels` to the app's Ontology SDK resources. Generate a new `@ap-homepage/sdk` version and install it. Make sure the app allows the `api:ontologies-read` scope.
+3. Tier 3 (Phase 4): the `DechoAgent` / `DechoAgentMemory` object types, Actions, the Workshop admin module and the Automate reflection rule.
+4. Phase 5: moving the host into a Compute Module.
+
+**Where the code differs from the plan above:**
+- **EXPLORE waypoints are chosen by game logic, not Jev.** It prefers unvisited, dry ground within about 60 m of home, which saves one `choice` question per tick.
+- **Rooms:** agents live in DechoWorld (`world:plains`) or their own Space. DechoWorld 2's DEM terrain is not supported yet.
+- **Build sites** relax from level 7×7 to sloped 7×7, then to 5×5. DechoWorld is too hilly for strictly level sites.
+- **Without a Jev key,** agents still run on simple heuristics. They answer someone who says their name or talks to them from very close, and they wander when bored.
+- **Background tabs:** keep the `/agents` tab visible. Browsers throttle timers in background tabs.
+
+---
+
 ## 0. What the app is on Foundry (and why that matters)
 
 Dechoverse is a **Developer Console application** of type *Client-facing*. It uses a public OAuth client with PKCE (`createPublicOauthClient` in `foundry/client.ts`) and is served through **Developer Console → Website hosting**. It is *not* a Workshop **custom widget** in the Foundry sense (a widget set built with `@osdk/widget.client`). That difference decides what AI players can do:
@@ -180,7 +219,7 @@ The LLM is called only for things that need language or judgement: chat replies,
 
 #### C1. The repository: *[DV] Dechoverse Agent Brains*
 
-**Where it lives.** It must be **on the same Ontology as the app's Ontology SDK**. A query is resolved by API name *within an ontology*, and the BGWS work already hit every failure you get otherwise: `QueryNotFound` when no API name is published, and `ViewOntologyPermissionDenied` when the repository imports an Ontology it has no rights over. Dechoverse has **no Ontology SDK yet** (see the comment in `foundry/client.ts`), so step 0 is choosing that Ontology (§9, Phase 0).
+**Where it lives.** It must be **on the same Ontology as the app's Ontology SDK**. A query is resolved by API name *within an ontology*, and the BGWS work already hit every failure you get otherwise: `QueryNotFound` when no API name is published, and `ViewOntologyPermissionDenied` when the repository imports an Ontology it has no rights over. For Dechoverse that is the **Accenture Ontology**, the one its generated SDK `@ap-homepage/sdk` was made against.
 
 **Queries:**
 
@@ -208,7 +247,7 @@ Separate queries rather than a flag on one, for the same reason as BGWS: **the b
 - **GPT-5 mini is a reasoning model.** As with `MAX_TOKENS_JEV["gpt-5-2"]`, give it a much larger `maxTokens` so hidden reasoning doesn't truncate the JSON.
 - **An empty reply is returned empty.** This is the BGWS lesson: a failed call must never look like "the model decided to say nothing". The app counts an empty string as unanswered and the agent just carries on.
 
-**Skeleton** (`functions-typescript/src/dechoAgents.ts`, same style as the BGWS file):
+**Skeleton** (the real file is `llmfunctions/dechoAgentFunctions.ts`; same style as the BGWS file):
 
 ```ts
 import { Query, UserFacingError } from "@foundry/functions-api";
@@ -302,7 +341,7 @@ export class DechoAgentFunctions {
 
 ```ts
 import { type Client, createClient, createPlatformClient } from "@osdk/client";
-import { $ontologyRid } from "@dechoverse/sdk";   // the package generated in Developer Console
+import { $ontologyRid } from "@ap-homepage/sdk";   // the app's generated SDK (Accenture Ontology)
 
 export const client: PlatformClient = createPlatformClient(foundryUrl, auth);   // streams, datasets (unchanged)
 export const ontologyClient: Client = createClient(foundryUrl, $ontologyRid, auth); // queries, objects, actions
@@ -316,7 +355,7 @@ export const ontologyClient: Client = createClient(foundryUrl, $ontologyRid, aut
 - It **refuses non-string results**. The contract is a string, and anything else means the published query and the caller have drifted.
 
 ```ts
-import * as sdk from "@dechoverse/sdk";
+import * as sdk from "@ap-homepage/sdk";
 import { ontologyClient } from "@/foundry/client";
 import { describeError } from "@/foundry/errors";
 import type { ModelCall } from "@/agents/brain/prompts";
@@ -384,7 +423,7 @@ export function foundryModelCall(model: AgentModelName, persona: string, kind: B
 - Any other failure leaves the agent silent for that exchange, counts one failure, and backs off (2 s, then 4 s, then 8 s).
 
 **Setup** (details in §9, Phase 0):
-- **Developer Console:** on the **Ontology SDK** tab, choose *"Yes, generate an Ontology SDK"* and pick the Ontology the brains repository is on. **The Ontology cannot be changed afterwards.**
+- **Developer Console:** the app already has an Ontology SDK (`@ap-homepage/sdk`, Accenture Ontology), so the brains repository goes on that Ontology.
   - Add the four queries as resources, so they become permitted resources and appear in the generated package.
   - Install the package with the npm instructions on the SDK's page.
   - **Regenerate the SDK whenever a query is added or its signature changes.**
@@ -519,7 +558,7 @@ One host serves all its agents. The streams are polled **once per level, not onc
 
 ### Persistent data per agent: the Ontology (Tier 3)
 
-Until Tier 3, personas live in `agents/config/personas.ts` and memories live in the host's memory. Once the Ontology SDK exists (Phase 0), they move into object types:
+Until Tier 3, personas live in `agents/config/personas.ts` and memories live in this browser's localStorage (`agents/brain/memory.ts`). Later they move into object types on the Accenture Ontology:
 
 | Object type | Backing | Key properties | Edited by |
 |---|---|---|---|
@@ -580,7 +619,7 @@ Docs: [Submission criteria](https://www.palantir.com/docs/foundry/action-types/s
 ## 9. Implementation Order (concrete tasks)
 
 ### Phase 0: Foundry setup and spikes (½–1 day)
-1. **Pick the Ontology.** In Developer Console, go to the Dechoverse app's **Ontology SDK** tab, choose *"Yes, generate an Ontology SDK"* and select the Ontology the agent brains will live on. This **can't be changed later**.
+1. **The Ontology is the Accenture Ontology**, which `@ap-homepage/sdk` is already generated against. Nothing to choose.
 2. **Create the functions repository** *[DV] Dechoverse Agent Brains* (TypeScript v1) **on that Ontology**, in the Dechoverse project:
    - Import the three fast models through **Resource Imports → Models** and copy their identifiers.
    - Implement `dechoAgentReply` / `dechoAgentPlan` / `dechoAgentDecide` / `dechoAgentModels` (§3C1).
@@ -643,7 +682,7 @@ Docs: [Compute modules](https://www.palantir.com/docs/foundry/compute-modules/ov
 
 | Resource | Where | Phase |
 |---|---|---|
-| Ontology SDK generated on the chosen Ontology (irreversible), regenerated whenever a query/type is added, and installed as `@dechoverse/sdk` (or whatever name the console gives it) | Developer Console → Ontology SDK tab | 0 |
+| `@ap-homepage/sdk` (Accenture Ontology) regenerated after the queries are added, and the new version installed | Developer Console → Ontology SDK tab | 0 |
 | *[DV] Dechoverse Agent Brains* TS v1 repository **on that Ontology**, with a tagged release | Code Repositories | 0 |
 | Fast models imported (Haiku, GPT mini, Gemini Flash) | Repository → Resource Imports → Models | 0 |
 | `dechoAgentReply`, `dechoAgentPlan`, `dechoAgentDecide`, `dechoAgentModels` added as app resources | Developer Console → Ontology SDK tab | 0 |
