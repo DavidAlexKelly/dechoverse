@@ -168,18 +168,28 @@ function createAgent(args: string[], context: CommandContext): CommandResult {
 }
 
 function listAgents(context: CommandContext): CommandResult {
-  const agents = context.host.snapshot().agents;
+  const snapshot = context.host.snapshot();
+  const agents = snapshot.agents;
+  const jev = snapshot.jevConfigured
+    ? `Jev: on (${snapshot.jevModel})`
+    : snapshot.jevError != null
+      ? `Jev: stopped — ${snapshot.jevError}`
+      : 'Jev: off — agents use simple rules ("jevkey <key>" to turn on)';
   if (agents.length === 0) {
-    return { ok: true, lines: ['No AI players running. Try "createagent gemini Dave".'] };
+    return { ok: true, lines: [jev, 'No AI players running. Try "createagent gemini Dave".'] };
   }
   return {
     ok: true,
-    lines: agents.map(
+    lines: [jev, ...agents.map(
       (agent) =>
         `${agent.userId} · ${agent.model} · ${agent.mode.toLowerCase()} · ${
           agent.levelKey === context.room.levelKey ? "here" : agent.levelKey
-        }${agent.brain.error != null ? ` · ⚠ ${agent.brain.error}` : ""}`,
-    ),
+        }${agent.goal != null ? ` · goal: ${agent.goal}` : ""}${
+          agent.plan != null ? ` · ${agent.plan.placed}/${agent.plan.total} cubes` : ""
+        }${agent.jev.calls > 0 ? ` · ${agent.jev.calls} Jev calls` : ""}${
+          agent.brain.error != null ? ` · ⚠ ${agent.brain.error}` : ""
+        }`,
+    )],
   };
 }
 

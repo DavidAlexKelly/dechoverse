@@ -26,7 +26,7 @@ Each query takes `(prompt: string, model: string, persona: string)` and returns 
 
 | Query | Reply the brief asks for |
 |---|---|
-| `dechoAgentReply` | `{"say":"…","replyTo":"m1","remember":null}` |
+| `dechoAgentReply` | `{"say":"…","replyTo":"m1","remember":null,"action":"none","build":null}`. `action` is one of those the prompt offers: `none`, `build`, `follow`, `stay`, `explore` or `stop_building`. |
 | `dechoAgentPlan` | `{"title":"…","site":"a","palette":["#rrggbb"],"cubes":[[dx,dy,dz,colourIndex]]}` |
 | `dechoAgentDecide` | `{"choice":"<key>","why":"…"}` |
 | `dechoAgentModels` | `["claude-haiku-4-5","gpt-5-4-mini","gemini-3-6-flash"]` |

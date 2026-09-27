@@ -7,6 +7,7 @@ import {
   type ConversationLine,
   type DecideOption,
   type PromptMessage,
+  type ReplyAction,
   buildDecidePrompt,
   buildPlanPrompt,
   buildReplyPrompt,
@@ -102,7 +103,9 @@ const THINK_WITHOUT_JEV_MS = 1000;
 /** Per agent, from the plan's budget table. */
 const MIN_GAP_MS: Record<BrainQueryKind, number> = {
   reply: 4000,
-  plan: 120000,
+  // Long enough that an agent does not redesign mid-build, short enough that
+  // "build something else" can be acted on straight away.
+  plan: 30000,
   decide: 10000,
 };
 /** After a failed brain query, back off this long, doubling to the cap. */
@@ -145,6 +148,13 @@ export class Agent {
   private placed = 0;
   private nextCubeAt = 0;
   private waypoint: { x: number; z: number } | null = null;
+  /**
+   * A build asked for while the brain was busy or the plan budget was spent:
+   * kept, and planned as soon as a query may run, rather than forgotten.
+   */
+  private planWanted: { near: { sessionId: string } | null } | null = null;
+  /** Told to stay put: keep facing people, but do not walk after them. */
+  private staying = false;
   /** Failed attempts to reach the build site, for giving up without Jev. */
   private buildRouteFailures = 0;
   private visited: Array<{ x: number; z: number }> = [];
@@ -242,6 +252,10 @@ export class Agent {
       return;
     }
     const distance = this.body.distanceTo(partner);
+    if (this.staying) {
+      this.body.lookAt(partner);
+      return;
+    }
     if (distance > 5 && now - this.lastRepathAt > REPATH_MS) {
       this.lastRepathAt = now;
       this.body.goTo(world, partner, 3.5);
@@ -314,6 +328,11 @@ export class Agent {
     }
     this.wake = false;
     this.thinking = true;
+    if (this.planWanted != null && this.canAsk("plan")) {
+      const { near } = this.planWanted;
+      this.planWanted = null;
+      void this.requestPlan(near);
+    }
     try {
       this.expirePending(now);
       const jev = this.services.jev();
@@ -512,7 +531,7 @@ export class Agent {
       }
       case "approach": {
         const player = this.view.roster().find((candidate) => candidate.sessionId === intent.sessionId);
-        if (player != null && now - this.lastRepathAt > REPATH_MS) {
+        if (player != null && !this.staying && now - this.lastRepathAt > REPATH_MS) {
           this.lastRepathAt = now;
           this.body.goTo(world, player, 3.5);
         }
@@ -665,14 +684,20 @@ export class Agent {
    * minimum gap per kind, and a back-off after failures. Returns the raw
    * text, or null when it did not run or failed.
    */
+  /** Whether a query of this kind may run now, within the budgets. */
+  private canAsk(kind: BrainQueryKind): boolean {
+    const now = performance.now();
+    return (
+      this.brainDisabled == null &&
+      this.brainBusy == null &&
+      now >= this.brainBackoffUntil &&
+      now - this.brainLastAt[kind] >= MIN_GAP_MS[kind]
+    );
+  }
+
   private async ask(kind: BrainQueryKind, prompt: string): Promise<string | null> {
     const now = performance.now();
-    if (
-      this.brainDisabled != null ||
-      this.brainBusy != null ||
-      now < this.brainBackoffUntil ||
-      now - this.brainLastAt[kind] < MIN_GAP_MS[kind]
-    ) {
+    if (!this.canAsk(kind)) {
       return null;
     }
     this.brainBusy = kind;
@@ -751,6 +776,7 @@ export class Agent {
         })),
       conversation: this.conversation,
       memories,
+      actions: this.replyActions(),
     });
 
     const text = await this.ask("reply", prompt);
@@ -758,7 +784,7 @@ export class Agent {
       return;
     }
     const keys = messages.map((message) => message.key);
-    const reply = parseReply(text, keys);
+    const reply = parseReply(text, keys, this.replyActions());
     if (reply == null) {
       this.services.log(this, "llm", `reply discarded: ${text.slice(0, 120)}`);
       if (messageKey != null) {
@@ -794,6 +820,91 @@ export class Agent {
     this.addConversation(this.name, reply.say);
     this.queuedLine = { text: reply.say, at: performance.now() };
     this.flushQueuedLine(performance.now());
+
+    const speaker =
+      answered != null ? { sessionId: answered.sessionId, userId: answered.userId } : greet;
+    if (reply.action !== "none") {
+      this.services.log(
+        this,
+        "llm",
+        `action: ${reply.action}${reply.build != null ? ` (${reply.build})` : ""}`,
+      );
+      await this.act(reply.action, reply.build, speaker);
+    }
+  }
+
+  /** What a reply may ask the game to do, right now, in this room. */
+  private replyActions(): ReplyAction[] {
+    const actions: ReplyAction[] = ["none", "follow", "stay", "explore"];
+    if (this.view.geometry.buildable) {
+      actions.push("build");
+    }
+    if (this.plan != null) {
+      actions.push("stop_building");
+    }
+    return actions;
+  }
+
+  /**
+   * Carries out what the model said it would do.
+   *
+   * The model only names an action from the offered list; everything about
+   * *how* — where to stand, what counts as following, which site to build
+   * on — is still game logic.
+   */
+  private async act(
+    action: ReplyAction,
+    build: string | null,
+    speaker: { sessionId: string; userId: string } | null,
+  ): Promise<void> {
+    const now = performance.now();
+    switch (action) {
+      case "none":
+        return;
+      case "follow":
+        if (speaker == null) {
+          return;
+        }
+        this.staying = false;
+        this.mind = {
+          ...this.mind,
+          mode: "SOCIAL",
+          since: now,
+          partner: { sessionId: speaker.sessionId, userId: speaker.userId },
+          lastHeardAt: now,
+          following: true,
+        };
+        return;
+      case "stay":
+        this.staying = true;
+        this.mind = { ...this.mind, following: false };
+        this.body.stop();
+        return;
+      case "explore":
+        this.staying = false;
+        this.body.stop();
+        this.waypoint = null;
+        this.mind = { ...this.mind, mode: "EXPLORE", since: now, partner: null, following: false };
+        return;
+      case "stop_building":
+        if (this.plan != null) {
+          this.services.log(this, "build", `Stopped building ${this.plan.title}`);
+        }
+        this.plan = null;
+        this.goal = null;
+        if (this.mind.mode === "BUILD") {
+          this.mind = { ...this.mind, mode: "IDLE", since: now };
+        }
+        return;
+      case "build":
+        this.staying = false;
+        this.plan = null;
+        this.goal = `build ${build ?? "something small"}`;
+        this.mind = { ...this.mind, following: false };
+        // Near whoever asked, so they can watch it go up.
+        await this.requestPlan(speaker);
+        return;
+    }
   }
 
   /** Jev's pre-publish check. Without Jev the brief's own rules have to do. */
@@ -958,6 +1069,12 @@ export class Agent {
     if (goal == null) {
       return;
     }
+    if (!this.canAsk("plan")) {
+      // Busy, or planned very recently: plan as soon as a query may run.
+      this.planWanted = { near };
+      this.services.log(this, "build", `Will plan "${goal}" in a moment`);
+      return;
+    }
     const state = this.view.state();
     const anchorPlayer = near != null ? this.view.roster().find((player) => player.sessionId === near.sessionId) : null;
     const around = anchorPlayer ?? { x: this.body.x, z: this.body.z };
@@ -999,7 +1116,7 @@ export class Agent {
         (plan.discarded > 0 ? ` (${plan.discarded} invalid cubes dropped)` : ""),
     );
     const now = performance.now();
-    this.mind = { ...this.mind, mode: "BUILD", since: now };
+    this.mind = { ...this.mind, mode: "BUILD", since: now, following: false };
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────

@@ -28,6 +28,22 @@ export interface ConversationLine {
   text: string;
 }
 
+/**
+ * What an agent may do as well as speak. The reply names one, and the game
+ * carries it out — which is how "go and build something" becomes a build
+ * rather than just a sentence about one.
+ */
+export type ReplyAction = "none" | "build" | "follow" | "stay" | "explore" | "stop_building";
+
+export const REPLY_ACTIONS: Record<ReplyAction, string> = {
+  none: "just talk; carry on as you were",
+  build: 'start building something now; say what in "build", e.g. "a small stone bridge"',
+  follow: "walk along with the person you are answering",
+  stay: "stop following and stay where you are",
+  explore: "wander off on your own",
+  stop_building: "give up on what you are building",
+};
+
 export interface ReplyPromptInput {
   agentName: string;
   goal: string | null;
@@ -39,6 +55,8 @@ export interface ReplyPromptInput {
   people: PromptPerson[];
   conversation: ConversationLine[];
   memories: string[];
+  /** The actions on offer right now; "build" only where building is allowed. */
+  actions: ReplyAction[];
 }
 
 function metres(distance: number | null): string {
@@ -97,6 +115,16 @@ export function buildReplyPrompt(input: ReplyPromptInput): string {
       `${input.greet} has just come near you. Say hello in your own way, and use "none" as replyTo.`,
     );
   }
+
+  lines.push("");
+  lines.push('ACTIONS (put exactly one in "action"; if someone asks you to do something, do it)');
+  for (const action of input.actions) {
+    lines.push(`- ${action}: ${REPLY_ACTIONS[action]}`);
+  }
+  lines.push("");
+  lines.push(
+    'Reply with JSON only, on one line: {"say":"...","replyTo":"<id>","remember":null,"action":"none","build":null}',
+  );
 
   return lines.join("\n");
 }

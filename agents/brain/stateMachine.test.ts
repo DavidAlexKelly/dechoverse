@@ -112,6 +112,34 @@ describe("being spoken to", () => {
   });
 });
 
+describe("talking while busy", () => {
+  test("a builder answers without putting the build down", () => {
+    const { state, intents } = decide(
+      mind({ mode: "BUILD", since: 0 }),
+      situation({ pending: message(), reflexes: reflexes({ addressedToMe: 0.95 }), hasPlan: true }),
+    );
+    expect(state.mode).toBe("BUILD");
+    expect(types(intents)).toEqual(expect.arrayContaining(["reply", "build"]));
+  });
+
+  test("a follower keeps following through a long silence", () => {
+    const { state } = decide(
+      mind({ mode: "SOCIAL", partner: DANA, lastHeardAt: 0, since: 0, following: true }),
+      situation({ now: 120000, partnerDistance: 8, reflexes: reflexes({ conversationOver: 0.95 }) }),
+    );
+    expect(state.mode).toBe("SOCIAL");
+  });
+
+  test("but not once the partner is out of earshot", () => {
+    const { state } = decide(
+      mind({ mode: "SOCIAL", partner: DANA, lastHeardAt: 0, since: 0, following: true }),
+      situation({ partnerDistance: 60 }),
+    );
+    expect(state.mode).not.toBe("SOCIAL");
+    expect(state.following).toBe(false);
+  });
+});
+
 describe("agents talking to agents", () => {
   const fromAgent = message({ sessionId: "agent:pixel:1", userId: "Pixel 🤖", isAgent: true });
 

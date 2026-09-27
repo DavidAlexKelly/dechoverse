@@ -1,4 +1,4 @@
-import type { BuildSite } from "@/agents/brain/prompts";
+import type { BuildSite, ReplyAction } from "@/agents/brain/prompts";
 
 /**
  * Reading what the brain queries returned.
@@ -61,9 +61,17 @@ export interface ParsedReply {
   /** The key answered, or "none" for an unprompted greeting. */
   replyTo: string;
   remember: string | null;
+  /** What to do as well as speak; "none" when missing or not on offer. */
+  action: ReplyAction;
+  /** For "build": what to build, in the model's words. */
+  build: string | null;
 }
 
-export function parseReply(text: string, allowedKeys: string[]): ParsedReply | null {
+export function parseReply(
+  text: string,
+  allowedKeys: string[],
+  allowedActions: ReplyAction[] = ["none"],
+): ParsedReply | null {
   const json = extractJsonObject(text);
   if (json == null || typeof json.say !== "string") {
     return null;
@@ -81,7 +89,14 @@ export function parseReply(text: string, allowedKeys: string[]): ParsedReply | n
     typeof json.remember === "string" && json.remember.trim() !== ""
       ? json.remember.trim().slice(0, 200)
       : null;
-  return { say, replyTo, remember };
+  // An action that was not offered is ignored, not obeyed: the words still stand.
+  const action =
+    typeof json.action === "string" && (allowedActions as string[]).includes(json.action)
+      ? (json.action as ReplyAction)
+      : "none";
+  const build =
+    typeof json.build === "string" && json.build.trim() !== "" ? json.build.trim().slice(0, 120) : null;
+  return { say, replyTo, remember, action, build };
 }
 
 export interface ParsedDecision {

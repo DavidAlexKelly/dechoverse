@@ -119,8 +119,13 @@ const REPLY_BRIEF = [
   "- If you learn something worth remembering about the person — their name for",
   '  something, what they like, what they are building — put it in "remember" as',
   "  one short sentence about them. Otherwise null.",
+  "- You can act as well as talk. Put exactly one of the ACTIONS listed below in",
+  '  "action". If someone asks you to build, follow, stay or go off exploring,',
+  "  agree in words AND choose that action — words alone do nothing. For",
+  '  "build", say what in "build" (e.g. "a small stone bridge"); otherwise null.',
   "",
-  'Reply with JSON only, on one line: {"say":"...","replyTo":"m1","remember":null}',
+  "Reply with JSON only, on one line:",
+  '{"say":"...","replyTo":"m1","remember":null,"action":"none","build":null}',
   "No prose, no code fences, nothing outside the JSON.",
 ].join("\n");
 
