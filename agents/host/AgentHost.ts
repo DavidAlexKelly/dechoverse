@@ -2,6 +2,7 @@ import { Agent, type AgentServices, type AgentSnapshot, type LogKind } from "@/a
 import { type JevClient, createJevClient } from "@/agents/brain/jev";
 import type { Persona } from "@/agents/config/personas";
 import type { AgentModelName } from "@/agents/data/brainClient";
+import type { LevelGeometry } from "@/agents/world/levels";
 import { WorldView } from "@/agents/world/WorldView";
 import type { EyePose } from "@/agents/body/Body";
 import { describeError } from "@/foundry/errors";
@@ -57,6 +58,12 @@ export interface SpawnOptions {
   levelKey: string;
   hat: string | null;
   color: string;
+  /**
+   * The room's ground, when the caller has it — the game does, for every
+   * room including DechoWorld 2. Without it only the rooms levelGeometry
+   * knows are possible.
+   */
+  geometry?: LevelGeometry;
 }
 
 const PHYSICS_MS = 50;
@@ -111,11 +118,22 @@ export class AgentHost {
     return this.agents.has(personaId);
   }
 
+  /** A running agent by display name, ignoring case and the robot suffix. */
+  findByName(name: string): string | null {
+    const wanted = name.trim().toLowerCase();
+    for (const agent of this.agents.values()) {
+      if (agent.name.toLowerCase() === wanted) {
+        return agent.id;
+      }
+    }
+    return null;
+  }
+
   spawn(persona: Persona, options: SpawnOptions): void {
     if (this.agents.has(persona.id) || this.disposed) {
       return;
     }
-    const view = this.acquireView(options.levelKey);
+    const view = this.acquireView(options.levelKey, options.geometry);
     const spawnAt = this.findSpawn(view, persona.home);
     const agent = new Agent(
       { ...persona, color: options.color, hat: options.hat },
@@ -368,13 +386,13 @@ export class AgentHost {
     void this.flushMarks();
   };
 
-  private acquireView(levelKey: string): WorldView {
+  private acquireView(levelKey: string, geometry?: LevelGeometry): WorldView {
     const existing = this.views.get(levelKey);
     if (existing != null) {
       existing.users++;
       return existing.view;
     }
-    const view = new WorldView(levelKey);
+    const view = new WorldView(levelKey, geometry);
     view.start();
     this.views.set(levelKey, { view, users: 1 });
     return view;

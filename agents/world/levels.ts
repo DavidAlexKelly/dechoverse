@@ -1,3 +1,4 @@
+import type { Obstacle } from "@/game/world/collision";
 import {
   MYSPACE_HALF_SIZE,
   WORLD_LEVEL_KEY,
@@ -13,7 +14,10 @@ import { type HeightField, SEA_LEVEL, heightAt } from "@/game/world/worldgen";
  * ground without reading a byte; a personal room is a flat floor with walls.
  * DechoWorld 2 is left out because its ground is a DEM streamed from a
  * dataset, and the Spaces rooms because they are furnished by the filesystem
- * rather than by marks — neither is somewhere an agent could see properly.
+ * rather than by marks. The in-game command line can put agents in those
+ * rooms anyway, because the game already has their ground loaded and hands
+ * it over (see useAgentHost); this list is for the /agents console, which
+ * has no game running.
  */
 export interface LevelGeometry {
   levelKey: string;
@@ -25,6 +29,13 @@ export interface LevelGeometry {
   seaLevel: number | null;
   /** Human readable, for the console. */
   label: string;
+  /** Whether agents may place cubes here. */
+  buildable: boolean;
+  /**
+   * Solid things that are not marks — DechoWorld 2's buildings — so agents
+   * walk round them as players do. Captured when the room is first used.
+   */
+  staticProps?: Obstacle[];
 }
 
 const FLAT: HeightField = () => 0;
@@ -37,6 +48,7 @@ export function levelGeometry(levelKey: string): LevelGeometry | null {
       halfSize: null,
       seaLevel: SEA_LEVEL,
       label: "DechoWorld",
+      buildable: true,
     };
   }
   const owner = myspaceOwner(levelKey);
@@ -47,6 +59,7 @@ export function levelGeometry(levelKey: string): LevelGeometry | null {
       halfSize: MYSPACE_HALF_SIZE,
       seaLevel: null,
       label: `${owner}'s Space`,
+      buildable: true,
     };
   }
   return null;

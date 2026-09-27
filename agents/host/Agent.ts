@@ -915,9 +915,18 @@ export class Agent {
         label: `Build what ${plainName(partner.userId)} asked for, next to them${lastAsk != null ? ` ("${lastAsk.text}")` : ""}.`,
       });
     }
-    this.persona.interests.forEach((interest, index) => {
-      options.push({ key: `build-${index + 1}`, label: `Build ${interest} somewhere nearby.` });
-    });
+    if (this.view.geometry.buildable) {
+      this.persona.interests.forEach((interest, index) => {
+        options.push({ key: `build-${index + 1}`, label: `Build ${interest} somewhere nearby.` });
+      });
+    } else {
+      // Nothing may be built in this room; saying so beats a plan nobody can place.
+      options.length = 0;
+    }
+    if (options.length === 0) {
+      this.services.log(this, "llm", "goal: nothing can be built in this room");
+      return;
+    }
     options.push({ key: "explore", label: "Nothing to build right now; go and explore instead." });
 
     const prompt = buildDecidePrompt({

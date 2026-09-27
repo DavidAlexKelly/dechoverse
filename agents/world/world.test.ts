@@ -14,6 +14,7 @@ const ROOM: LevelGeometry = {
   halfSize: 12,
   seaLevel: null,
   label: "Test room",
+  buildable: true,
 };
 
 function cube(x: number, y: number, z: number): Cube {

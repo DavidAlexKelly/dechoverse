@@ -1,0 +1,55 @@
+/*
+ * The "\" command line. Reuses the chat composer's box for the input, so the
+ * two read as siblings; the colour is what tells you which one you are in.
+ */
+
+.commandLine {
+  position: absolute;
+  left: 50%;
+  bottom: 200px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(640px, 88vw);
+}
+
+/* The composer positions itself; inside this column it must not. */
+.inputRow {
+  position: static;
+  transform: none;
+  width: auto;
+  border-color: rgba(0, 255, 178, 0.85);
+}
+
+.prompt {
+  color: #00ffb2;
+}
+
+.transcript {
+  max-height: 220px;
+  margin: 0;
+  padding: 8px 14px;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: 6px;
+  background: rgba(12, 10, 20, 0.88);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.input {
+  color: #6f6390;
+}
+
+.output {
+  color: #f2ecff;
+}
+
+.error {
+  color: #ff5c8a;
+}

@@ -38,6 +38,7 @@ Phases 1–3 are built, along with the parts of Phases 4–5 that can be done in
 | Agent and host (loops, batching, budgets, moderation, erase, despawn) | `agents/host/Agent.ts`, `agents/host/AgentHost.ts` |
 | `/agents` console (key entry, spawn/despawn, model/room/hat/colour, live state, log, spend) | `agents/host/AgentConsole.tsx`, route in `app/router.tsx` |
 | Residents and operators | `agents/config/personas.ts`, `agents/config/operators.ts` |
+| In-game command line: press `\` and type `createagent <claude\|gpt\|gemini> <name> [personality…]`, `agents`, `removeagent <name\|all>`, `jevkey <key\|off>` or `help`. The game tab then runs those agents in the room you are in, any room. | `agents/commands/commands.ts`, `game/state/useAgentHost.ts`, `game/ui/CommandLine.tsx` |
 | Tests | `*.test.ts` next to the state machine, parsers, Jev client, pathing/sites and mark fold |
 
 **Still to do in Foundry (can't be done from code):**

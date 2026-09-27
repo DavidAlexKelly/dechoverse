@@ -131,8 +131,8 @@ export class WorldView {
 
   readonly links: WorldLinks = { presence: null, chat: null, marks: null };
 
-  constructor(levelKey: string) {
-    const geometry = levelGeometry(levelKey);
+  constructor(levelKey: string, provided?: LevelGeometry) {
+    const geometry = provided ?? levelGeometry(levelKey);
     if (geometry == null) {
       throw new Error(`AI players cannot live in "${levelKey}".`);
     }
@@ -243,7 +243,7 @@ export class WorldView {
       const craters = foldCraters(this.marks, this.levelKey);
       const pads = foldPads(this.marks, this.levelKey);
       const terrainAt = buildTerrainSampler(craters, pads, this.geometry.base);
-      const props: Obstacle[] = objects.map(obstacleFor);
+      const props: Obstacle[] = [...objects.map(obstacleFor), ...(this.geometry.staticProps ?? [])];
       this.derived = {
         cubes,
         objects,
