@@ -14,8 +14,6 @@ import { loadTagTexture } from "@/foundry/tagMedia";
 import {
   MAX_STROKE_DABS,
   MAX_SWEEP_PADS,
-  decodeDabs,
-  decodePads,
   encodeDabs,
   encodePads,
 } from "@/game/domain/codec";
@@ -31,9 +29,17 @@ import type {
   PlacedObject,
   TagDecal,
 } from "@/game/domain/types";
+import {
+  foldCraters,
+  foldCubes,
+  foldDoors,
+  foldObjects,
+  foldPads,
+  foldPaint,
+  foldStrokes,
+  mergeMarks,
+} from "@/game/state/markFold";
 import { usePolling } from "@/game/state/usePolling";
-import { isFurnitureKind } from "@/game/world/furnitureCatalog";
-import { DEFAULT_CUBE_COLOR, DEFAULT_CUBE_OPACITY } from "@/game/world/voxels";
 
 export type SyncStatus = "loading" | "live" | "offline";
 
@@ -168,24 +174,7 @@ export function useMarkSync({ levelKey, sessionId, userId, readOnly = false }: O
     if (records.length === 0) {
       return;
     }
-    setMarks((previous) => {
-      let changed = false;
-      const next = new Map(previous);
-      for (const record of records) {
-        const existing = next.get(record.markId);
-        if (existing != null) {
-          if (existing.timestamp > record.timestamp) {
-            continue;
-          }
-          if (existing.timestamp === record.timestamp && existing.deleted === record.deleted) {
-            continue;
-          }
-        }
-        next.set(record.markId, record);
-        changed = true;
-      }
-      return changed ? next : previous;
-    });
+    setMarks((previous) => mergeMarks(previous, records));
   }, []);
 
   const flush = useCallback(async () => {
@@ -666,43 +655,14 @@ export function useMarkSync({ levelKey, sessionId, userId, readOnly = false }: O
   }, [marks, textures, levelKey]);
 
   const paint = useMemo(() => {
-    const blobs: PaintBlob[] = [];
-    for (const record of marks.values()) {
-      if (record.deleted || record.kind !== "paint") {
-        continue;
-      }
-      if (record.levelKey !== levelKey) {
-        continue;
-      }
-      blobs.push({
-        id: record.markId,
-        position: [record.x ?? 0, record.y ?? 0, record.z ?? 0],
-        quaternion: [record.qx ?? 0, record.qy ?? 0, record.qz ?? 0, record.qw ?? 1],
-        radius: record.size ?? 0.2,
-        color: record.color ?? "#a100ff",
-      });
-    }
+    const blobs = foldPaint(marks, levelKey);
     return blobs.length > MAX_RENDERED_PAINT
       ? blobs.slice(blobs.length - MAX_RENDERED_PAINT)
       : blobs;
   }, [marks, levelKey]);
 
   const strokes = useMemo(() => {
-    const sprayed: PaintStroke[] = [];
-    for (const record of marks.values()) {
-      if (record.deleted || record.kind !== "stroke" || record.levelKey !== levelKey) {
-        continue;
-      }
-      const dabs = decodeDabs(record.points);
-      if (dabs.length === 0) {
-        continue;
-      }
-      sprayed.push({
-        id: record.markId,
-        color: record.color ?? "#a100ff",
-        dabs,
-      });
-    }
+    const sprayed = foldStrokes(marks, levelKey);
     // The cap counts strokes rather than dabs now, so a room holds far more
     // paint than it used to before anything is dropped.
     return sprayed.length > MAX_RENDERED_STROKES
@@ -735,118 +695,11 @@ export function useMarkSync({ levelKey, sessionId, userId, readOnly = false }: O
     return decals;
   }, [marks, textures, levelKey]);
 
-  const objects = useMemo(() => {
-    const placed: PlacedObject[] = [];
-    for (const record of marks.values()) {
-      if (record.deleted || record.levelKey !== levelKey) {
-        continue;
-      }
-      if (!isFurnitureKind(record.kind)) {
-        continue;
-      }
-      // Recover the heading from the pure Y rotation stored on the record.
-      const yaw = 2 * Math.atan2(record.qy ?? 0, record.qw ?? 1);
-      placed.push({
-        id: record.markId,
-        kind: record.kind,
-        position: [record.x ?? 0, record.y ?? 0, record.z ?? 0],
-        yaw,
-      });
-    }
-    return placed;
-  }, [marks, levelKey]);
-
-  const doors = useMemo(() => {
-    const placed: PlacedDoor[] = [];
-    for (const record of marks.values()) {
-      if (record.deleted || record.kind !== "door" || record.levelKey !== levelKey) {
-        continue;
-      }
-      placed.push({
-        id: record.markId,
-        userId: record.userId,
-        position: [record.x ?? 0, record.y ?? 0, record.z ?? 0],
-        yaw: 2 * Math.atan2(record.qy ?? 0, record.qw ?? 1),
-      });
-    }
-    return placed;
-  }, [marks, levelKey]);
-
-  const craters = useMemo(() => {
-    const dug: Crater[] = [];
-    for (const record of marks.values()) {
-      if (record.deleted || record.kind !== "dig" || record.levelKey !== levelKey) {
-        continue;
-      }
-      dug.push({
-        id: record.markId,
-        x: record.x ?? 0,
-        z: record.z ?? 0,
-        radius: record.size ?? 1.8,
-        depth: record.height ?? 1.2,
-      });
-    }
-    return dug;
-  }, [marks, levelKey]);
-
-  const cubes = useMemo(() => {
-    const built: Cube[] = [];
-    for (const record of marks.values()) {
-      if (record.deleted || record.kind !== "cube" || record.levelKey !== levelKey) {
-        continue;
-      }
-      built.push({
-        id: record.markId,
-        x: record.x ?? 0,
-        y: record.y ?? 0,
-        z: record.z ?? 0,
-        color: record.color ?? DEFAULT_CUBE_COLOR,
-        opacity: record.width ?? DEFAULT_CUBE_OPACITY,
-      });
-    }
-    return built;
-  }, [marks, levelKey]);
-
-  const pads = useMemo(() => {
-    const levelled: FlatPad[] = [];
-    for (const record of marks.values()) {
-      if (record.deleted || record.levelKey !== levelKey) {
-        continue;
-      }
-
-      // A sweep expands into the pads it contains, all sharing the record's
-      // level and radius. Expanding here keeps the terrain maths, the chunk
-      // invalidation and the collision height field working on a flat list,
-      // exactly as they did before sweeps existed.
-      if (record.kind === "sweep") {
-        const points = decodePads(record.points);
-        for (let index = 0; index < points.length; index++) {
-          levelled.push({
-            id: `${record.markId}#${index}`,
-            markId: record.markId,
-            x: points[index][0],
-            z: points[index][1],
-            radius: record.size ?? 3,
-            level: record.y ?? 0,
-          });
-        }
-        continue;
-      }
-
-      // Legacy one-pad-per-record marks, from before sweeps.
-      if (record.kind === "flat") {
-        levelled.push({
-          id: record.markId,
-          markId: record.markId,
-          x: record.x ?? 0,
-          z: record.z ?? 0,
-          radius: record.size ?? 3,
-          level: record.y ?? 0,
-        });
-      }
-    }
-    return levelled;
-  }, [marks, levelKey]);
+  const objects = useMemo(() => foldObjects(marks, levelKey), [marks, levelKey]);
+  const doors = useMemo(() => foldDoors(marks, levelKey), [marks, levelKey]);
+  const craters = useMemo(() => foldCraters(marks, levelKey), [marks, levelKey]);
+  const cubes = useMemo(() => foldCubes(marks, levelKey), [marks, levelKey]);
+  const pads = useMemo(() => foldPads(marks, levelKey), [marks, levelKey]);
 
   const imageLibrary = useMemo(() => {
     const newestByRid = new Map<string, number>();

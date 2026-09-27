@@ -1,4 +1,5 @@
-import { type PlatformClient, createPlatformClient } from "@osdk/client";
+import { $ontologyRid } from "@ap-homepage/sdk";
+import { type Client, type PlatformClient, createClient, createPlatformClient } from "@osdk/client";
 import { type PublicOauthClient, createPublicOauthClient } from "@osdk/oauth";
 
 function getMetaTagContent(tagName: string): string {
@@ -30,6 +31,8 @@ const redirectUrl = getMetaTagContent("osdk-redirectUrl");
  * - filesystem-read: browsing spaces, projects and folders
  * - streams-read/write: paint, tags and live player presence
  * - mediasets-read/write: tag images in the [AP] tags media set
+ * - ontologies-read: executing the AI players' brain queries (dechoAgent*),
+ *   which are ontology-scoped functions on the Accenture Ontology
  */
 const scopes = [
   // Resolving the signed in user's name for their avatar label.
@@ -42,6 +45,8 @@ const scopes = [
   "api:streams-write",
   "api:mediasets-read",
   "api:mediasets-write",
+  // Executing the AI players' brain queries through the generated OSDK.
+  "api:ontologies-read",
 ];
 
 export const auth: PublicOauthClient = createPublicOauthClient(clientId, foundryUrl, redirectUrl, {
@@ -51,11 +56,17 @@ export const auth: PublicOauthClient = createPublicOauthClient(clientId, foundry
 /**
  * Initialize the client to interact with the Platform SDK.
  *
- * Everything this app does — filesystem browsing, streams and media sets — is
- * Platform SDK, so no Ontology client is needed. If an Ontology SDK is added
- * later, follow the steps in
- * https://accenture.palantirfoundry.com/docs/foundry/ontology-sdk/add-osdk-to-bootstrapped-repository/
+ * Filesystem browsing, streams, datasets and media sets are all Platform SDK.
  */
 export const client: PlatformClient = createPlatformClient(foundryUrl, auth);
+
+/**
+ * The Ontology SDK client, for the AI players' brain queries.
+ *
+ * Queries are ontology-scoped: executeFunction goes to
+ * /v2/ontologies/{ontology}/queries/{apiName}/execute, and the ontology is the
+ * one @ap-homepage/sdk was generated against. Same sign-in as `client`.
+ */
+export const ontologyClient: Client = createClient(foundryUrl, $ontologyRid, auth);
 
 export default client;
