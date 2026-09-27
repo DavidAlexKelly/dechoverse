@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import type { JevAnswer, JevQuestions, JevResult } from "@/agents/brain/jev";
 import type { Intent, Mode, Reflexes } from "@/agents/brain/stateMachine";
 

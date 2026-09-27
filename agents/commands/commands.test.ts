@@ -22,7 +22,7 @@ function fakeHost(): AgentControl & { spawned: Array<{ persona: Persona; options
     },
     despawn: (id) => {
       const index = spawned.findIndex((entry) => entry.persona.id === id);
-      if (index >= 0) spawned.splice(index, 1);
+      if (index >= 0) {spawned.splice(index, 1);}
     },
     findByName: (name) =>
       spawned.find((entry) => entry.persona.name.toLowerCase() === name.toLowerCase())?.persona.id ??

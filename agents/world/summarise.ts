@@ -50,11 +50,11 @@ function bearing(self: SelfSummary, x: number, z: number): string {
   // Angle of the other person relative to where this agent is facing.
   const toward = Math.atan2(-(x - self.x), -(z - self.z));
   let relative = toward - self.yaw;
-  while (relative > Math.PI) relative -= Math.PI * 2;
-  while (relative < -Math.PI) relative += Math.PI * 2;
+  while (relative > Math.PI) {relative -= Math.PI * 2;}
+  while (relative < -Math.PI) {relative += Math.PI * 2;}
   const degrees = (relative * 180) / Math.PI;
-  if (Math.abs(degrees) < 30) return "in front";
-  if (Math.abs(degrees) > 150) return "behind";
+  if (Math.abs(degrees) < 30) {return "in front";}
+  if (Math.abs(degrees) > 150) {return "behind";}
   const side = degrees > 0 ? "left" : "right";
   return Math.abs(degrees) < 90 ? `front-${side}` : `behind-${side}`;
 }
