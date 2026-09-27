@@ -57,8 +57,8 @@ import { Query, UserFacingError } from "@foundry/functions-api";
 // shows different ones, rename them here and in `run` — nothing else changes.
 import {
   AnthropicClaude_4_5_Haiku,
-  GPT_5_Mini,
-  Gemini_2_5_Flash,
+  GPT_5_4_mini,
+  Gemini_3_6_Flash,
 } from "@foundry/models-api/language-models";
 
 /**
@@ -67,39 +67,35 @@ import {
  * falling back to a default nobody chose. Kept in step by hand with
  * AGENT_MODELS in the app's agents/data/brainClient.ts.
  */
-export type AgentModel = "claude-haiku-4-5" | "gpt-5-mini" | "gemini-2-5-flash";
+export type AgentModel =
+  | "claude-haiku-4-5"
+  | "gpt-5-4-mini"
+  | "gemini-3-6-flash";
 
-const MODELS: AgentModel[] = ["claude-haiku-4-5", "gpt-5-mini", "gemini-2-5-flash"];
+const MODELS: AgentModel[] = [
+  "claude-haiku-4-5",
+  "gpt-5-4-mini",
+  "gemini-3-6-flash",
+];
 
 const TEMPERATURE_REPLY = 0.8;
 const TEMPERATURE_PLAN = 0.4;
 const TEMPERATURE_DECIDE = 0;
 
 /**
- * GPT-5 mini reasons before answering and may count that hidden reasoning
- * against the limit, so it gets far more room: a reply cut short is
- * unreadable JSON, and an unreadable reply is a line never spoken. A higher
- * ceiling costs nothing unless it is used.
+ * One ceiling per brief, shared by every model rather than tuned per model.
+ * GPT-5.4 mini reasons before answering and may count that hidden reasoning
+ * against the limit, so its number is the one that has to cover a reply cut
+ * short as unreadable JSON; Claude and Gemini simply inherit the same
+ * headroom rather than each carrying their own tuned figure.
  */
-const MAX_TOKENS_REPLY: Record<AgentModel, number> = {
-  "claude-haiku-4-5": 250,
-  "gpt-5-mini": 2500,
-  "gemini-2-5-flash": 500,
-};
+const MAX_TOKENS_REPLY = 2500;
 
 /** Up to 200 cubes at a dozen characters each, plus the envelope. */
-const MAX_TOKENS_PLAN: Record<AgentModel, number> = {
-  "claude-haiku-4-5": 3000,
-  "gpt-5-mini": 8000,
-  "gemini-2-5-flash": 4000,
-};
+const MAX_TOKENS_PLAN = 8000;
 
 /** A single key and one sentence. */
-const MAX_TOKENS_DECIDE: Record<AgentModel, number> = {
-  "claude-haiku-4-5": 200,
-  "gpt-5-mini": 2000,
-  "gemini-2-5-flash": 400,
-};
+const MAX_TOKENS_DECIDE = 2000;
 
 const WORLD = [
   "Dechoverse is a shared 3D world. People walk about, talk out loud to whoever",
@@ -177,27 +173,41 @@ export class DechoAgentFunctions {
    * @param persona The agent's name and character.
    */
   @Query({ apiName: "dechoAgentReply" })
-  public async dechoAgentReply(prompt: string, model: string, persona: string): Promise<string> {
-    this.requirePrompt(prompt, "No conversation was supplied, so there is nothing to answer.");
+  public async dechoAgentReply(
+    prompt: string,
+    model: string,
+    persona: string
+  ): Promise<string> {
+    this.requirePrompt(
+      prompt,
+      "No conversation was supplied, so there is nothing to answer."
+    );
     const chosen = this.modelFor(model);
     return this.run(
       chosen,
       this.compose(REPLY_BRIEF, persona, prompt),
       TEMPERATURE_REPLY,
-      MAX_TOKENS_REPLY[chosen],
+      MAX_TOKENS_REPLY
     );
   }
 
   /** A small build on one of the sites the app offers. */
   @Query({ apiName: "dechoAgentPlan" })
-  public async dechoAgentPlan(prompt: string, model: string, persona: string): Promise<string> {
-    this.requirePrompt(prompt, "No sites were supplied, so there is nowhere to build.");
+  public async dechoAgentPlan(
+    prompt: string,
+    model: string,
+    persona: string
+  ): Promise<string> {
+    this.requirePrompt(
+      prompt,
+      "No sites were supplied, so there is nowhere to build."
+    );
     const chosen = this.modelFor(model);
     return this.run(
       chosen,
       this.compose(PLAN_BRIEF, persona, prompt),
       TEMPERATURE_PLAN,
-      MAX_TOKENS_PLAN[chosen],
+      MAX_TOKENS_PLAN
     );
   }
 
@@ -209,14 +219,21 @@ export class DechoAgentFunctions {
    * did.
    */
   @Query({ apiName: "dechoAgentDecide" })
-  public async dechoAgentDecide(prompt: string, model: string, persona: string): Promise<string> {
-    this.requirePrompt(prompt, "No decision was supplied, so there is nothing to decide.");
+  public async dechoAgentDecide(
+    prompt: string,
+    model: string,
+    persona: string
+  ): Promise<string> {
+    this.requirePrompt(
+      prompt,
+      "No decision was supplied, so there is nothing to decide."
+    );
     const chosen = this.modelFor(model);
     return this.run(
       chosen,
       this.compose(DECIDE_BRIEF, persona, prompt),
       TEMPERATURE_DECIDE,
-      MAX_TOKENS_DECIDE[chosen],
+      MAX_TOKENS_DECIDE
     );
   }
 
@@ -238,7 +255,7 @@ export class DechoAgentFunctions {
     const chosen = MODELS.find((candidate) => candidate === model);
     if (chosen === undefined) {
       throw new UserFacingError(
-        `Unknown agent model "${model}". Available: ${MODELS.join(", ")}.`,
+        `Unknown agent model "${model}". Available: ${MODELS.join(", ")}.`
       );
     }
     return chosen;
@@ -253,7 +270,9 @@ export class DechoAgentFunctions {
    */
   private compose(brief: string, persona: string, prompt: string): string {
     const system =
-      persona && persona.trim().length > 0 ? `${brief}\n\nWHO YOU ARE\n\n${persona.trim()}` : brief;
+      persona && persona.trim().length > 0
+        ? `${brief}\n\nWHO YOU ARE\n\n${persona.trim()}`
+        : brief;
     return `${system}\n\n---\n\n${prompt}`;
   }
 
@@ -269,12 +288,12 @@ export class DechoAgentFunctions {
     chosen: AgentModel,
     content: string,
     temperature: number,
-    maxTokens: number,
+    maxTokens: number
   ): Promise<string> {
     let completion: string | undefined;
     if (chosen === "claude-haiku-4-5") {
       completion = await this.askClaude(content, temperature, maxTokens);
-    } else if (chosen === "gpt-5-mini") {
+    } else if (chosen === "gpt-5-4-mini") {
       completion = await this.askGpt(content, temperature, maxTokens);
     } else {
       completion = await this.askGemini(content, temperature, maxTokens);
@@ -291,33 +310,36 @@ export class DechoAgentFunctions {
   private async askClaude(
     content: string,
     temperature: number,
-    maxTokens: number,
+    maxTokens: number
   ): Promise<string | undefined> {
-    const response = await AnthropicClaude_4_5_Haiku.createGenericChatCompletion({
-      params: { temperature, maxTokens },
-      messages: [{ role: "USER", contents: [{ text: content }] }],
-    });
+    const response =
+      await AnthropicClaude_4_5_Haiku.createGenericChatCompletion({
+        params: { temperature, maxTokens },
+        messages: [{ role: "USER", contents: [{ text: content }] }],
+      });
     return response.completion;
   }
 
   private async askGpt(
     content: string,
     temperature: number,
-    maxTokens: number,
+    maxTokens: number
   ): Promise<string | undefined> {
-    const response = await GPT_5_Mini.createChatCompletion({
+    const response = await GPT_5_4_mini.createChatCompletion({
       params: { temperature, maxTokens },
       messages: [{ role: "USER", contents: [{ text: content }] }],
     });
-    return response.choices.length > 0 ? response.choices[0].message.content : undefined;
+    return response.choices.length > 0
+      ? response.choices[0].message.content
+      : undefined;
   }
 
   private async askGemini(
     content: string,
     temperature: number,
-    maxTokens: number,
+    maxTokens: number
   ): Promise<string | undefined> {
-    const response = await Gemini_2_5_Flash.createGenericChatCompletion({
+    const response = await Gemini_3_6_Flash.createGenericChatCompletion({
       params: { temperature, maxTokens },
       messages: [{ role: "USER", contents: [{ text: content }] }],
     });
