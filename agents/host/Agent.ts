@@ -83,6 +83,13 @@ export interface AgentServices {
   spent: (dollars: number) => void;
   /** Called when a Jev failure should stop every agent (no credits, bad key). */
   jevFatal: (message: string) => void;
+  /**
+   * The room's speaking floor: when whoever spoke last will have finished
+   * (local clock), and a way to take it. Agents wait for it so they never
+   * talk over each other, or over a human.
+   */
+  floorFreeAt: (levelKey: string) => number;
+  takeFloor: (levelKey: string, text: string) => void;
 }
 
 export type LogKind = "mode" | "heard" | "said" | "jev" | "llm" | "build" | "error";
@@ -130,7 +137,7 @@ const CONVERSATION_LINES = 8;
 /** Greet the same person unprompted at most this often. */
 const GREET_EVERY_MS = 5 * 60 * 1000;
 /** A spoken line waits at most this long for the bubble lock to clear. */
-const SAY_QUEUE_TTL_MS = 10000;
+const SAY_QUEUE_TTL_MS = 25000;
 /** Extra gap after a bubble ends before the next line. */
 const SAY_GAP_MS = 3000;
 /** A player coming within this range wakes the mind. */
@@ -1140,9 +1147,12 @@ export class Agent {
     }
     const unlockAt =
       this.lastSaid == null ? -Infinity : this.lastSaidAt + bubbleDurationMs(this.lastSaid) + SAY_GAP_MS;
-    if (now < unlockAt) {
+    if (now < unlockAt || now < this.services.floorFreeAt(this.levelKey)) {
       return;
     }
+    // Taken at once, before anyone else in this tab can: two agents ready in
+    // the same tick speak one after the other, not together.
+    this.services.takeFloor(this.levelKey, queued.text);
     this.queuedLine = null;
     this.lastSaid = queued.text;
     this.lastSaidAt = now;
