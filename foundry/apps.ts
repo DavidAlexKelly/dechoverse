@@ -28,4 +28,14 @@ export const APP_LINKS: AppLink[] = [
     color: "#ff8f4d",
     url: `${foundryUrl}/workspace/workshop/`,
   },
+  {
+    // This app's own /agents page, where AI players are spawned. It opens in
+    // a new tab, which is what the agents need: they run in that tab while
+    // you walk around in this one.
+    id: "ai-players",
+    name: "AI Players",
+    caption: "Spawn residents",
+    color: "#ff5c8a",
+    url: `${window.location.origin}${import.meta.env.BASE_URL}agents`,
+  },
 ];
