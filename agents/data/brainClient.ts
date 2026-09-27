@@ -114,6 +114,15 @@ export function foundryModelCall(
       };
       result = await execute.executeFunction({ prompt, model, persona });
     } catch (error) {
+      // The function threw a UserFacingError (HTTP 409): its own words, in
+      // parameters.message, are the whole story — show them, not the status.
+      const detail = error as { errorName?: unknown; parameters?: { message?: unknown } };
+      if (detail?.errorName === "QueryEncounteredUserFacingError") {
+        throw new BrainCallError(
+          `${name} refused: ${String(detail.parameters?.message ?? "no message")}`,
+          false,
+        );
+      }
       const denied = looksLikePermissionProblem(error);
       throw new BrainCallError(
         denied

@@ -55,7 +55,30 @@ export function useAgentHost(
       if (key !== "") {
         created.configureJev(key, storedJevModel());
       }
-      created.subscribe((snapshot) => setAgentCount(snapshot.agents.length));
+      let seenUpTo = Date.now();
+      created.subscribe((snapshot) => {
+        setAgentCount(snapshot.agents.length);
+        // Agents' errors — a brain query failing, Jev unreachable — land in
+        // the command line, so the reason an agent is silent is visible
+        // without opening the developer tools.
+        const fresh = snapshot.log.filter((entry) => entry.kind === "error" && entry.at > seenUpTo);
+        if (fresh.length === 0) {
+          return;
+        }
+        seenUpTo = Math.max(...fresh.map((entry) => entry.at));
+        setTranscript((previous) => {
+          const next = [...previous];
+          for (const entry of fresh) {
+            const text = `${entry.agentName}: ${entry.text}`;
+            // The same failure repeating (a retry) is said once.
+            if (next.length > 0 && next[next.length - 1].text === text) {
+              continue;
+            }
+            next.push({ id: serial.current++, kind: "error", text });
+          }
+          return next.slice(-TRANSCRIPT_LIMIT);
+        });
+      });
       hostRef.current = created;
     }
     return hostRef.current;
