@@ -50,11 +50,13 @@ import { WaterLayer } from "@/game/render/WaterLayer";
 import { DaylightSky, DechoWorld } from "@/game/render/World";
 import { isMuted, primeSpeech, setMuted as setSpeechMuted } from "@/game/state/speech";
 import { useCharacter } from "@/game/state/useCharacter";
+import { useAgentHost } from "@/game/state/useAgentHost";
 import { useChat } from "@/game/state/useChat";
 import { useMarkSync } from "@/game/state/useMarkSync";
 import { type Pose, usePresence } from "@/game/state/usePresence";
 import CharacterPanel from "@/game/ui/CharacterPanel";
 import ChatComposer from "@/game/ui/ChatComposer";
+import CommandLine from "@/game/ui/CommandLine";
 import css from "@/game/ui/Hud.module.css";
 import VirtualCursor from "@/game/ui/VirtualCursor";
 import ColorWheel from "@/game/ui/pickers/ColorWheel";
@@ -328,6 +330,10 @@ function Game(): React.ReactElement {
   const [wetStroke, setWetStroke] = useState<PaintStroke | null>(null);
   const wetRef = useRef<{ color: string; dabs: Dab[] } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  /** The "\" command line: typed, but never said. */
+  const [commandOpen, setCommandOpen] = useState(false);
+  /** Either text box owns the keyboard. */
+  const typing = chatOpen || commandOpen;
   const [muted, setMutedState] = useState(() => isMuted());
   /**
    * The local camera pose, sampled every frame. Presence keeps its own copy
@@ -739,6 +745,45 @@ function Game(): React.ReactElement {
   );
 
   /**
+   * This room as the AI players need it: its ground, its walls, whether they
+   * may build. Handed over whole because the game already has it loaded —
+   * DechoWorld 2's DEM included — so "createagent" works in any room.
+   */
+  const agentRoom = useMemo(() => {
+    const label = current?.name ?? "the hub";
+    if (inWorld) {
+      return {
+        levelKey,
+        label,
+        geometry: worldReady
+          ? {
+              levelKey,
+              label,
+              base: terrain.base,
+              halfSize: null,
+              seaLevel: terrain.seaLevel,
+              buildable: canEdit,
+              staticProps: buildingBoxes,
+            }
+          : null,
+      };
+    }
+    return {
+      levelKey,
+      label,
+      geometry: {
+        levelKey,
+        label,
+        base: () => 0,
+        halfSize: roomHalfSize,
+        seaLevel: null,
+        buildable: canBuild && canEdit,
+      },
+    };
+  }, [current, levelKey, inWorld, worldReady, terrain, buildingBoxes, canEdit, canBuild, roomHalfSize]);
+  const agents = useAgentHost(agentRoom, localPoseRef);
+
+  /**
    * The model pack, listed from the dataset once per session. An empty list
    * on failure is fine: the picker still offers the two built-in props.
    */
@@ -836,9 +881,10 @@ function Game(): React.ReactElement {
   // follows the link in the open panel.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
-      // While the composer owns the keyboard, no tool, colour or navigation
-      // binding may fire. Player is gated the same way, via inputCaptured.
-      if (chatOpen) {
+      // While the composer or the command line owns the keyboard, no tool,
+      // colour or navigation binding may fire. Player is gated the same way,
+      // via inputCaptured.
+      if (typing) {
         return;
       }
 
@@ -858,6 +904,19 @@ function Game(): React.ReactElement {
         e.preventDefault();
         if (!e.repeat) {
           setChatOpen(true);
+        }
+        return;
+      }
+
+      // "\" opens the command line: the same kind of box, but for commands
+      // such as createagent rather than for speech.
+      if (e.key === "\\") {
+        if (modalOpen) {
+          return;
+        }
+        e.preventDefault();
+        if (!e.repeat) {
+          setCommandOpen(true);
         }
         return;
       }
@@ -923,7 +982,7 @@ function Game(): React.ReactElement {
     tools,
     drawMode,
     createMode,
-    chatOpen,
+    typing,
     pickerOpen,
     createPickerOpen,
     muted,
@@ -942,7 +1001,7 @@ function Game(): React.ReactElement {
    */
   useEffect(() => {
     const handleWheel = (e: WheelEvent): void => {
-      if (chatOpen || menuOpen || e.deltaY === 0) {
+      if (typing || menuOpen || e.deltaY === 0) {
         return;
       }
 
@@ -974,7 +1033,7 @@ function Game(): React.ReactElement {
     };
     window.addEventListener("wheel", handleWheel, { passive: true });
     return () => window.removeEventListener("wheel", handleWheel);
-  }, [tools, chatOpen, menuOpen]);
+  }, [tools, typing, menuOpen]);
 
   // Digging and levelling only mean anything where there is terrain; leaving
   // DechoWorld with one selected would give a tool that silently does nothing.
@@ -1714,7 +1773,7 @@ function Game(): React.ReactElement {
           spawnKey={levelKey}
           mode={mode}
           weapon={weapon}
-          inputCaptured={chatOpen || menuOpen}
+          inputCaptured={typing || menuOpen}
           continuous={weapon === "create" && (createMode === "flatten" || createMode === "restore")}
           halfSize={inWorld ? null : roomHalfSize}
           voxelWorld={voxelWorld}
@@ -1942,6 +2001,17 @@ function Game(): React.ReactElement {
           lockedUntil={chat.mine?.until ?? null}
           onSend={chat.send}
           onClose={() => setChatOpen(false)}
+        />
+      )}
+
+      {commandOpen && (
+        <CommandLine
+          onRun={(line) => {
+            agents.run(line);
+          }}
+          onClose={() => setCommandOpen(false)}
+          transcript={agents.transcript}
+          history={agents.history}
         />
       )}
 

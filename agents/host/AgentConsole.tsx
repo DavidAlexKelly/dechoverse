@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { DEFAULT_JEV_MODEL } from "@/agents/brain/jev";
 import { forgetAll, memoryCount } from "@/agents/brain/memory";
 import { agentUserId } from "@/agents/config/identity";
+import { storeJev, storedJevKey, storedJevModel } from "@/agents/config/session";
 import { isOperator } from "@/agents/config/operators";
 import { PERSONAS, type Persona } from "@/agents/config/personas";
 import {
@@ -29,8 +29,6 @@ import styles from "@/agents/host/AgentConsole.module.css";
  * the bundle, which every Dechoverse player downloads.
  */
 
-const KEY_STORAGE = "dechoverse-openrouter-key";
-const MODEL_STORAGE = "dechoverse-jev-model";
 const SETTINGS_STORAGE = "dechoverse-agent-settings";
 
 interface PersonaSettings {
@@ -38,26 +36,6 @@ interface PersonaSettings {
   levelKey: string;
   hat: string | null;
   color: string;
-}
-
-function readSession(key: string): string {
-  try {
-    return window.sessionStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function writeSession(key: string, value: string): void {
-  try {
-    if (value === "") {
-      window.sessionStorage.removeItem(key);
-    } else {
-      window.sessionStorage.setItem(key, value);
-    }
-  } catch {
-    // Not remembered; the operator types it again next time.
-  }
 }
 
 function defaultSettings(persona: Persona): PersonaSettings {
@@ -107,8 +85,8 @@ function saveSettings(settings: Record<string, PersonaSettings>): void {
 function AgentConsole(): React.ReactElement {
   const hostRef = useRef<AgentHost | null>(null);
   const [snapshot, setSnapshot] = useState<HostSnapshot | null>(null);
-  const [apiKey, setApiKey] = useState(() => readSession(KEY_STORAGE));
-  const [jevModel, setJevModel] = useState(() => readSession(MODEL_STORAGE) || DEFAULT_JEV_MODEL);
+  const [apiKey, setApiKey] = useState(storedJevKey);
+  const [jevModel, setJevModel] = useState(storedJevModel);
   const [settings, setSettings] = useState(loadSettings);
   const [visible, setVisible] = useState(() => document.visibilityState === "visible");
   const [notice, setNotice] = useState<string | null>(null);
@@ -126,9 +104,9 @@ function AgentConsole(): React.ReactElement {
   useEffect(() => {
     const host = new AgentHost();
     hostRef.current = host;
-    const key = readSession(KEY_STORAGE);
+    const key = storedJevKey();
     if (key !== "") {
-      host.configureJev(key, readSession(MODEL_STORAGE) || DEFAULT_JEV_MODEL);
+      host.configureJev(key, storedJevModel());
     }
     const unsubscribe = host.subscribe(setSnapshot);
     return () => {
@@ -169,8 +147,7 @@ function AgentConsole(): React.ReactElement {
   );
 
   const applyJev = (): void => {
-    writeSession(KEY_STORAGE, apiKey.trim());
-    writeSession(MODEL_STORAGE, jevModel.trim());
+    storeJev(apiKey, jevModel);
     host?.configureJev(apiKey, jevModel);
     setNotice(apiKey.trim() === "" ? "Jev switched off: agents use simple heuristics." : "Jev key applied.");
   };
