@@ -2,6 +2,7 @@ import { Agent, type AgentServices, type AgentSnapshot, type LogKind } from "@/a
 import { type JevClient, createJevClient } from "@/agents/brain/jev";
 import type { Persona } from "@/agents/config/personas";
 import type { AgentModelName } from "@/agents/data/brainClient";
+import { ProjectBoard } from "@/agents/build/project";
 import type { LevelGeometry } from "@/agents/world/levels";
 import { WorldView } from "@/agents/world/WorldView";
 import type { EyePose } from "@/agents/body/Body";
@@ -77,6 +78,8 @@ const MAX_POSES_PER_BATCH = 80;
 
 export class AgentHost {
   private agents = new Map<string, Agent>();
+  /** Builds in progress, shared so one agent can help with another's. */
+  private readonly projects = new ProjectBoard();
   private views = new Map<string, { view: WorldView; users: number }>();
   private jev: JevClient | null = null;
   private jevModel: string | null = null;
@@ -301,7 +304,22 @@ export class AgentHost {
       // Solid straight away for every agent in the room, then published in a batch.
       agent.view.applyLocalMarks([record]);
       this.markOutbox.push(record);
+      return record.markId;
     },
+    eraseMarks: (agent, markIds) => {
+      const records: MarkRecord[] = markIds.map((markId) => ({
+        timestamp: Date.now(),
+        markId,
+        levelKey: agent.levelKey,
+        deleted: true,
+        userId: agent.userId,
+        sessionId: agent.sessionId,
+        schemaVersion: MARK_SCHEMA_VERSION,
+      }));
+      agent.view.applyLocalMarks(records);
+      this.markOutbox.push(...records);
+    },
+    projects: this.projects,
     log: (agent, kind, text) => this.record(agent, kind, text),
     spent: (dollars) => {
       this.spent += dollars;

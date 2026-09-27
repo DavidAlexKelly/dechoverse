@@ -32,10 +32,13 @@
  * can therefore only choose badly, never cheat; the prompts and parsers are
  * unit tested without calling a model; and swapping models is a parameter.
  *
- * WHY FOUR QUERIES
+ * WHY FIVE QUERIES
  *
- *   dechoAgentReply   one spoken line, answering one of the messages listed.
- *   dechoAgentPlan    a small cube build on one of the sites listed.
+ *   dechoAgentReply   one spoken line, answering one of the messages listed,
+ *                     plus an action (build, follow, stay …) the game carries out.
+ *   dechoAgentPlan    a small build, in shapes, on one of the sites listed.
+ *   dechoAgentReview  a look at a build in progress, drawn layer by layer:
+ *                     carry on with more parts, take cubes out, or finish.
  *   dechoAgentDecide  one decision the fast reflex model (Jev) was unsure
  *                     about, or the choice of a new goal, from keyed options.
  *   dechoAgentModels  the models accepted, for the app's picker.
@@ -97,6 +100,9 @@ const MAX_TOKENS_PLAN = 8000;
 /** A single key and one sentence. */
 const MAX_TOKENS_DECIDE = 2000;
 
+/** A look at a build: a note and a few parts, or "done". */
+const MAX_TOKENS_REVIEW = 4000;
+
 const WORLD = [
   "Dechoverse is a shared 3D world. People walk about, talk out loud to whoever",
   "is near them, and build things out of one-metre coloured cubes. You are one",
@@ -134,20 +140,40 @@ const PLAN_BRIEF = [
   "",
   "You are going to build something small with cubes. Design it.",
   "",
-  "- Choose exactly ONE of the sites listed, by its key. Each site is a square",
-  "  of cells on flat ground; cube positions are relative to its corner:",
-  "  dx and dz from 0 to size-1, dy from 0 (resting on the ground) upwards.",
-  "- Every cube must rest on the ground (dy = 0) or directly on another cube in",
-  "  the same column (a cube at dy-1). Floating cubes are discarded.",
-  "- At most 200 cubes. Smaller and recognisable beats large and shapeless: a",
-  "  hut, a tower, an arch, a bench, a sign, a tree, a little wall with a gate.",
-  "- Up to four colours as #rrggbb hex. Each cube names its colour by index into",
-  "  your palette. Colours that suit the ones already nearby are nicer to live with.",
-  "- Order the cubes bottom-up, the way you would actually build it.",
+  "- Choose exactly ONE of the sites listed, by its key. Positions are cells from",
+  "  the site's corner: x and z from 0 to size-1, y = layers above the ground",
+  "  (0 = resting on it).",
+  "- Describe it in shapes (\"parts\"): wall, floor, box, pillar, roof, arch, clear",
+  "  and cube, as listed in the prompt. Use clear, after the part it cuts into,",
+  "  for doors and windows. The game turns the parts into cubes.",
+  "- Every cube must connect to the ground through other cubes, above, below or",
+  "  beside. Anything unconnected is discarded.",
+  "- Smaller and recognisable beats large and shapeless: a hut, a tower, an arch,",
+  "  a bench, a bridge, a tree, a little wall with a gate. You will get to look at",
+  "  it as it goes up and add to it, so the first plan can be the main structure.",
+  "- Up to four colours as #rrggbb hex; parts name a colour by palette index in",
+  '  "c". Colours that suit the ones already nearby are nicer to live with.',
   "",
   "Reply with JSON only, on one line:",
-  '{"title":"...","site":"<key>","palette":["#rrggbb"],"cubes":[[dx,dy,dz,colourIndex]]}',
+  '{"title":"...","site":"<key>","palette":["#rrggbb"],"parts":[...]}',
   "No prose, no code fences, nothing outside the JSON.",
+].join("\n");
+
+const REVIEW_BRIEF = [
+  WORLD,
+  "",
+  "You are part way through a build. The prompt draws what is actually standing",
+  "on your site, one grid per layer, top layer first. Look at it the way a builder",
+  "steps back from a wall.",
+  "",
+  "- If it is turning out as you meant, carry on — or add what it still needs.",
+  "- If something is wrong, take it out with clear parts and put it right.",
+  '- If it is finished, say "done". Stopping at the right time is part of it.',
+  "- New parts may rest on what is already standing. The same shapes as before.",
+  "",
+  "Reply with JSON only, on one line:",
+  '{"status":"continue|done","note":"<one sentence>","palette":["#rrggbb"],"parts":[...]}',
+  '("palette" only for colours you have not used yet.) No prose, no code fences.',
 ].join("\n");
 
 const DECIDE_BRIEF = [
@@ -239,6 +265,32 @@ export class DechoAgentFunctions {
       this.compose(DECIDE_BRIEF, persona, prompt),
       TEMPERATURE_DECIDE,
       MAX_TOKENS_DECIDE
+    );
+  }
+
+  /**
+   * A look at a build in progress.
+   *
+   * Optional for the app: without it published, builds go up exactly as
+   * first planned. Reply: {"status","note","palette","parts"}; an empty or
+   * unreadable reply counts as a look that changed nothing.
+   */
+  @Query({ apiName: "dechoAgentReview" })
+  public async dechoAgentReview(
+    prompt: string,
+    model: string,
+    persona: string
+  ): Promise<string> {
+    this.requirePrompt(
+      prompt,
+      "No build was supplied, so there is nothing to look at."
+    );
+    const chosen = this.modelFor(model);
+    return this.run(
+      chosen,
+      this.compose(REVIEW_BRIEF, persona, prompt),
+      TEMPERATURE_PLAN,
+      MAX_TOKENS_REVIEW
     );
   }
 

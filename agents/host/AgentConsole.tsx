@@ -142,8 +142,9 @@ function AgentConsole(): React.ReactElement {
 
   const host = hostRef.current;
   const running = new Map((snapshot?.agents ?? []).map((agent) => [agent.id, agent]));
+  // The review query is optional: without it builds simply are not revisited.
   const missingQueries = (Object.keys(queries) as Array<keyof typeof queries>).filter(
-    (kind) => !queries[kind],
+    (kind) => kind !== "review" && !queries[kind],
   );
 
   const applyJev = (): void => {
@@ -237,6 +238,12 @@ function AgentConsole(): React.ReactElement {
             {missingQueries.length === 0
               ? "all present in @ap-homepage/sdk"
               : `missing ${missingQueries.map((kind) => QUERY_NAMES[kind]).join(", ")} — publish llmfunctions/ and regenerate the SDK`}
+          </li>
+          <li className={queries.review ? styles.ok : styles.bad}>
+            Build reviews:{" "}
+            {queries.review
+              ? "on — builders look at their work as it goes up"
+              : "off — publish dechoAgentReview to let builders look at and extend their work"}
           </li>
           {snapshot?.presenceError != null && (
             <li className={styles.bad}>Presence publish: {snapshot.presenceError}</li>

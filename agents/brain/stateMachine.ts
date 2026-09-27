@@ -26,7 +26,6 @@ export interface Reflexes {
   /** 0 ignorable … 4 must respond now. */
   urgency: number | null;
   conversationOver: number | null;
-  wantsCollaboration: number | null;
   /** Another agent's message deserves a reply at all. */
   worthReplying: number | null;
   stuck: number | null;
@@ -37,7 +36,6 @@ export const NO_REFLEXES: Reflexes = {
   nextState: null,
   urgency: null,
   conversationOver: null,
-  wantsCollaboration: null,
   worthReplying: null,
   stuck: null,
 };
@@ -242,14 +240,8 @@ export function decide(
       } else {
         intents.push({ type: "face", sessionId: partner.sessionId });
       }
-      if (
-        (reflexes?.wantsCollaboration ?? 0) > 0.75 &&
-        !situation.hasPlan &&
-        now - state.goalRequestedAt > GOAL_RETRY_MS
-      ) {
-        state = { ...state, goalRequestedAt: now };
-        intents.push({ type: "chooseGoal" });
-      }
+      // Building on request goes through the reply's "build" action; there is
+      // no separate "wants to build with me" reflex any more.
       break;
     }
 

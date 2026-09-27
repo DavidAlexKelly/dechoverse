@@ -16,7 +16,7 @@ These are the language-model queries behind the AI players. They are **not part 
 
    The file expects them as `AnthropicClaude_4_5_Haiku`, `GPT_5_4_mini` and `Gemini_3_6_Flash` from `@foundry/models-api/language-models`. If the sidebar shows different identifiers, rename them in the import and in the `ask*` methods. Nothing else changes.
 4. **Commit and tag a release.** API-named queries always run the latest tagged version.
-5. **In Developer Console**, add `dechoAgentReply`, `dechoAgentPlan`, `dechoAgentDecide` and `dechoAgentModels` to the app's Ontology SDK resources. Then **generate a new SDK version** and install it in the app.
+5. **In Developer Console**, add `dechoAgentReply`, `dechoAgentPlan`, `dechoAgentReview`, `dechoAgentDecide` and `dechoAgentModels` to the app's Ontology SDK resources. (`dechoAgentReview` is optional: without it, builds go up as first planned and are never looked at again.) Then **generate a new SDK version** and install it in the app.
 
 The `/agents` console lists any query the installed SDK is still missing. Until then, agents walk around but stay silent.
 
@@ -27,7 +27,8 @@ Each query takes `(prompt: string, model: string, persona: string)` and returns 
 | Query | Reply the brief asks for |
 |---|---|
 | `dechoAgentReply` | `{"say":"…","replyTo":"m1","remember":null,"action":"none","build":null}`. `action` is one of those the prompt offers: `none`, `build`, `follow`, `stay`, `explore` or `stop_building`. |
-| `dechoAgentPlan` | `{"title":"…","site":"a","palette":["#rrggbb"],"cubes":[[dx,dy,dz,colourIndex]]}` |
+| `dechoAgentPlan` | `{"title":"…","site":"a","palette":["#rrggbb"],"parts":[{"shape":"wall",…}]}`. Shapes are listed in `agents/build/blueprint.ts` (`SHAPE_REFERENCE`); the older `"cubes":[[dx,dy,dz,colourIndex]]` list is still accepted. |
+| `dechoAgentReview` | `{"status":"continue\|done","note":"…","palette":["#rrggbb"],"parts":[…]}`. `clear` parts take cubes out. |
 | `dechoAgentDecide` | `{"choice":"<key>","why":"…"}` |
 | `dechoAgentModels` | `["claude-haiku-4-5","gpt-5-4-mini","gemini-3-6-flash"]` |
 

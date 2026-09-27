@@ -36,13 +36,21 @@ export type ModelCall = (prompt: string) => Promise<string>;
  *   plan    a small cube build on an offered site
  *   decide  one escalated or goal decision from keyed options
  */
-export type BrainQueryKind = "reply" | "plan" | "decide";
+export type BrainQueryKind = "reply" | "plan" | "decide" | "review";
 
 export const QUERY_NAMES: Record<BrainQueryKind, string> = {
   reply: "dechoAgentReply",
   plan: "dechoAgentPlan",
   decide: "dechoAgentDecide",
+  // A look at a build in progress. Optional: without it, builds go up as
+  // first planned and are never revisited.
+  review: "dechoAgentReview",
 };
+
+/** Whether the installed SDK has this query at all. */
+export function hasQuery(kind: BrainQueryKind): boolean {
+  return (sdk as unknown as Record<string, unknown>)[QUERY_NAMES[kind]] != null;
+}
 
 export class BrainCallError extends Error {
   constructor(
@@ -79,9 +87,12 @@ function queryFor(kind: BrainQueryKind): { query: QueryDefinition<unknown>; name
 
 /** Which brain queries the installed SDK has, for the console's readiness check. */
 export function availableQueries(): Record<BrainQueryKind, boolean> {
-  const has = (kind: BrainQueryKind): boolean =>
-    (sdk as unknown as Record<string, unknown>)[QUERY_NAMES[kind]] != null;
-  return { reply: has("reply"), plan: has("plan"), decide: has("decide") };
+  return {
+    reply: hasQuery("reply"),
+    plan: hasQuery("plan"),
+    decide: hasQuery("decide"),
+    review: hasQuery("review"),
+  };
 }
 
 function looksLikePermissionProblem(error: unknown): boolean {

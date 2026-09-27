@@ -1,3 +1,5 @@
+import { SHAPE_REFERENCE } from "@/agents/build/blueprint";
+
 /**
  * The prompts sent to the brain queries in llmfunctions/.
  *
@@ -33,11 +35,19 @@ export interface ConversationLine {
  * carries it out — which is how "go and build something" becomes a build
  * rather than just a sentence about one.
  */
-export type ReplyAction = "none" | "build" | "follow" | "stay" | "explore" | "stop_building";
+export type ReplyAction =
+  | "none"
+  | "build"
+  | "help_build"
+  | "follow"
+  | "stay"
+  | "explore"
+  | "stop_building";
 
 export const REPLY_ACTIONS: Record<ReplyAction, string> = {
   none: "just talk; carry on as you were",
   build: 'start building something now; say what in "build", e.g. "a small stone bridge"',
+  help_build: "go and help with another AI's build nearby",
   follow: "walk along with the person you are answering",
   stay: "stop following and stay where you are",
   explore: "wander off on your own",
@@ -57,6 +67,8 @@ export interface ReplyPromptInput {
   memories: string[];
   /** The actions on offer right now; "build" only where building is allowed. */
   actions: ReplyAction[];
+  /** More specific wording for some actions, e.g. whose build help_build joins. */
+  actionNotes?: Partial<Record<ReplyAction, string>>;
 }
 
 function metres(distance: number | null): string {
@@ -119,7 +131,7 @@ export function buildReplyPrompt(input: ReplyPromptInput): string {
   lines.push("");
   lines.push('ACTIONS (put exactly one in "action"; if someone asks you to do something, do it)');
   for (const action of input.actions) {
-    lines.push(`- ${action}: ${REPLY_ACTIONS[action]}`);
+    lines.push(`- ${action}: ${input.actionNotes?.[action] ?? REPLY_ACTIONS[action]}`);
   }
   lines.push("");
   lines.push(
@@ -166,7 +178,63 @@ export function buildPlanPrompt(input: PlanPromptInput): string {
       : "COLOURS ALREADY NEARBY: none — the area is untouched.",
   );
   lines.push("");
-  lines.push(`At most ${input.maxCubes} cubes.`);
+  lines.push(SHAPE_REFERENCE);
+  lines.push("");
+  lines.push(
+    `At most ${input.maxCubes} cubes in all. You will get to look at it and add to it as it goes up, so the`,
+  );
+  lines.push("first plan can be the main structure.");
+  lines.push("");
+  lines.push("Reply with JSON only, on one line:");
+  lines.push('{"title":"...","site":"<key>","palette":["#rrggbb"],"parts":[...]}');
+  return lines.join("\n");
+}
+
+export interface ReviewPromptInput {
+  agentName: string;
+  goal: string;
+  title: string;
+  siteSize: number;
+  palette: string[];
+  /** drawSite's picture of what stands on the site now. */
+  picture: string;
+  placed: number;
+  /** Cubes still queued from earlier plans. */
+  queued: number;
+  helpers: string[];
+  reviewsLeft: number;
+  maxCubes: number;
+}
+
+export function buildReviewPrompt(input: ReviewPromptInput): string {
+  const lines: string[] = [];
+  lines.push(`You are ${input.agentName}, building ${input.title} (${input.goal}).`);
+  if (input.helpers.length > 0) {
+    lines.push(`${input.helpers.join(" and ")} ${input.helpers.length === 1 ? "is" : "are"} helping you.`);
+  }
+  lines.push(
+    `${input.placed} cubes placed so far, ${input.queued} still to place from your plan. ` +
+      `The site is ${input.siteSize}×${input.siteSize}.`,
+  );
+  lines.push("");
+  lines.push("WHAT IS STANDING ON YOUR SITE NOW (top layer first)");
+  lines.push(input.picture);
+  lines.push("");
+  lines.push(
+    `Look at it. Is it turning out as you meant? You may add parts, take cubes out with "clear", or say it is done.`,
+  );
+  lines.push(
+    `You can look ${input.reviewsLeft} more time${input.reviewsLeft === 1 ? "" : "s"}; at most ${input.maxCubes} more cubes now.`,
+  );
+  lines.push("");
+  lines.push(SHAPE_REFERENCE);
+  lines.push("New cubes may also rest on what is already standing.");
+  lines.push("");
+  lines.push("Reply with JSON only, on one line:");
+  lines.push(
+    '{"status":"continue|done","note":"<one sentence>","palette":["#rrggbb"],"parts":[...]}',
+  );
+  lines.push('("palette" only for new colours, added after the existing ones.)');
   return lines.join("\n");
 }
 

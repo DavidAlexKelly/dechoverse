@@ -2,16 +2,20 @@ import { Body, yawTowards } from "@/agents/body/Body";
 import { PoseSampler } from "@/agents/body/poseSampler";
 import { type JevClient, JevError, noul } from "@/agents/brain/jev";
 import { recall, remember } from "@/agents/brain/memory";
-import { type BuildPlan, parseDecide, parsePlan, parseReply } from "@/agents/brain/parse";
+import { parseDecide, parsePlan, parseReply, parseReview } from "@/agents/brain/parse";
 import {
   type ConversationLine,
   type DecideOption,
   type PromptMessage,
   type ReplyAction,
+  type BuildSite,
   buildDecidePrompt,
   buildPlanPrompt,
   buildReplyPrompt,
+  buildReviewPrompt,
 } from "@/agents/brain/prompts";
+import { MAX_LAYERS, drawSite } from "@/agents/build/blueprint";
+import { BuildProject, type ProjectBoard } from "@/agents/build/project";
 import {
   ANSWER_OPTIONS,
   MODERATION_QUESTIONS,
@@ -39,6 +43,7 @@ import {
   BrainCallError,
   type BrainQueryKind,
   foundryModelCall,
+  hasQuery,
 } from "@/agents/data/brainClient";
 import { cubeCentre, findBuildSites } from "@/agents/world/sites";
 import { nearbyColours, summarise } from "@/agents/world/summarise";
@@ -46,7 +51,7 @@ import type { HeardMessage, WorldPlayer, WorldView } from "@/agents/world/WorldV
 import type { EyePose } from "@/agents/body/Body";
 import { HEARING_RADIUS, SHOUT_RADIUS } from "@/game/state/useChat";
 import { bubbleDurationMs, isShout } from "@/game/state/speech";
-import { cellOf, hasCube } from "@/game/world/voxels";
+import { cellKey as voxelKey, cellOf, hasCube } from "@/game/world/voxels";
 
 /**
  * One AI player: a body in a room, a mind that decides, and the calls that
@@ -66,7 +71,12 @@ import { cellOf, hasCube } from "@/game/world/voxels";
 export interface AgentServices {
   jev: () => JevClient | null;
   publishChat: (agent: Agent, text: string) => Promise<void>;
-  placeCube: (agent: Agent, centre: { x: number; y: number; z: number }, color: string) => void;
+  /** Places one cube and returns the id of the mark it wrote. */
+  placeCube: (agent: Agent, centre: { x: number; y: number; z: number }, color: string) => string;
+  /** Erases marks this agent's builds placed. */
+  eraseMarks: (agent: Agent, markIds: string[]) => void;
+  /** Builds in progress in this tab, for sharing. */
+  projects: ProjectBoard;
   log: (agent: Agent, kind: LogKind, text: string) => void;
   /** Called when a Jev call reports its cost, for the console's meter. */
   spent: (dollars: number) => void;
@@ -107,6 +117,7 @@ const MIN_GAP_MS: Record<BrainQueryKind, number> = {
   // "build something else" can be acted on straight away.
   plan: 30000,
   decide: 10000,
+  review: 15000,
 };
 /** After a failed brain query, back off this long, doubling to the cap. */
 const BRAIN_BACKOFF_MS = 2000;
@@ -129,7 +140,16 @@ const CUBES_PER_MINUTE = 20;
 const BUILD_REACH = 5;
 /** Re-path towards a moving person at most this often. */
 const REPATH_MS = 1500;
+/** Cubes in a whole build, across the first plan and every look at it. */
+const MAX_PROJECT_CUBES = 320;
+/** The first plan's share, leaving room for the looks to add to it. */
 const MAX_PLAN_CUBES = 200;
+/** How many times the owner looks at a build and decides what next. */
+const MAX_REVIEWS = 5;
+/** Look again after this many more cubes. */
+const REVIEW_EVERY = 24;
+/** Join builds by other agents within this range. */
+const JOIN_RANGE = 40;
 
 export class Agent {
   readonly id: string;
@@ -144,8 +164,8 @@ export class Agent {
   private mind: MindState;
 
   private goal: string | null = null;
-  private plan: BuildPlan | null = null;
-  private placed = 0;
+  /** The build this agent is working on, its own or one it joined. */
+  private project: BuildProject | null = null;
   private nextCubeAt = 0;
   private waypoint: { x: number; z: number } | null = null;
   /**
@@ -181,6 +201,7 @@ export class Agent {
     reply: -Infinity,
     plan: -Infinity,
     decide: -Infinity,
+    review: -Infinity,
   };
   private brainBackoffUntil = 0;
   private brainBackoffMs = BRAIN_BACKOFF_MS;
@@ -222,6 +243,7 @@ export class Agent {
   }
 
   dispose(): void {
+    this.leaveProject("Went home from");
     this.unsubscribe();
   }
 
@@ -415,7 +437,7 @@ export class Agent {
       hasPending: pending != null,
       pendingFromAgent: pending?.isAgent ?? false,
       hasPartner: this.mind.partner != null && partnerPlayer != null,
-      building: this.plan != null,
+      building: this.project != null,
     });
 
     try {
@@ -505,8 +527,8 @@ export class Agent {
               greetedRecently:
                 now - (this.greeted.get(nearest.player.userId) ?? -Infinity) < GREET_EVERY_MS,
             },
-      hasPlan: this.plan != null,
-      planComplete: this.plan != null && this.placed >= this.plan.cubes.length,
+      hasPlan: this.project != null,
+      planComplete: this.project != null && this.project.done,
       hasWaypoint: this.waypoint != null && this.body.moving,
       agentTurns: this.agentTurnTimes.length,
     };
@@ -559,9 +581,7 @@ export class Agent {
         // Placement happens every frame in buildStep; nothing to start here.
         break;
       case "abandonPlan":
-        this.services.log(this, "build", `Gave up on ${this.plan?.title ?? "the build"}`);
-        this.plan = null;
-        this.goal = null;
+        this.leaveProject("Gave up on");
         break;
       case "stand":
         this.body.stop();
@@ -607,29 +627,58 @@ export class Agent {
     }
   }
 
-  /** Places the next cube of the plan when in reach and the rate allows. */
+  /**
+   * Works on the current build: take a cube from the shared queue, walk to
+   * where it can be placed, place it. The owner also decides when to look at
+   * the build again, and when it is finished.
+   */
   private buildStep(now: number): void {
-    const plan = this.plan;
-    if (plan == null || this.mind.mode !== "BUILD" || this.placed >= plan.cubes.length) {
+    const project = this.project;
+    if (project == null) {
       return;
     }
+    if (project.done) {
+      this.services.log(this, "build", `Finished ${project.title}`);
+      this.addConversation(this.name, `(finished building ${project.title})`);
+      this.project = null;
+      this.goal = null;
+      return;
+    }
+    if (this.mind.mode !== "BUILD") {
+      return;
+    }
+    const owner = project.ownerId === this.id;
+    if (owner) {
+      this.considerReview(project);
+    }
+
+    const cube = project.claim(this.id);
+    if (cube == null) {
+      // Nothing left to place: the owner decides what next; helpers wait.
+      if (owner && !project.reviewing && !this.mayReview(project)) {
+        project.finish();
+      }
+      this.body.lookAt({ x: project.site.cellX + project.site.size / 2, z: project.site.cellZ + project.site.size / 2 });
+      return;
+    }
+
     const world = this.view.state().world;
-    const cube = plan.cubes[this.placed];
-    const centre = cubeCentre(world, plan.site, cube);
+    const centre = cubeCentre(world, project.site, cube);
 
-    // Someone already filled this cell — a human helping, most likely. Skip it.
+    // Someone already filled this cell. Skip it.
     if (hasCube(world.voxels, cellOf(centre.x), cellOf(centre.y), cellOf(centre.z))) {
-      this.placed++;
+      project.skip(this.id);
       return;
     }
 
-    const standAt = this.standingSpot(plan, centre);
+    const standAt = this.standingSpot(project.site, centre);
     const distance = Math.hypot(centre.x - this.body.x, centre.z - this.body.z);
+    const site = project.site;
     const insideFootprint =
-      this.body.x > plan.site.cellX - 0.4 &&
-      this.body.x < plan.site.cellX + plan.site.size + 0.4 &&
-      this.body.z > plan.site.cellZ - 0.4 &&
-      this.body.z < plan.site.cellZ + plan.site.size + 0.4;
+      this.body.x > site.cellX - 0.4 &&
+      this.body.x < site.cellX + site.size + 0.4 &&
+      this.body.z > site.cellZ - 0.4 &&
+      this.body.z < site.cellZ + site.size + 0.4;
 
     if (distance > BUILD_REACH || insideFootprint) {
       if (!this.body.moving || now - this.lastRepathAt > 4000) {
@@ -639,10 +688,8 @@ export class Agent {
         this.buildRouteFailures = routed && !stalled ? 0 : this.buildRouteFailures + 1;
         if (this.buildRouteFailures >= 3) {
           // Game logic's own "stuck", for when Jev is not there to say so.
-          this.services.log(this, "build", `Cannot reach the site for ${plan.title}; giving up.`);
-          this.plan = null;
-          this.goal = null;
           this.buildRouteFailures = 0;
+          this.leaveProject("Cannot reach the site for");
         }
       }
       return;
@@ -655,18 +702,13 @@ export class Agent {
       return;
     }
     this.nextCubeAt = now + 60000 / CUBES_PER_MINUTE;
-    this.services.placeCube(this, centre, cube.color);
-    this.placed++;
-    if (this.placed >= plan.cubes.length) {
-      this.services.log(this, "build", `Finished ${plan.title}`);
-      this.addConversation(this.name, `(finished building ${plan.title})`);
-      this.goal = null;
-    }
+    const markId = this.services.placeCube(this, centre, cube.color);
+    project.placedBy(this.id, markId);
   }
 
   /** A spot just outside the site, on the side nearest the cube. */
-  private standingSpot(plan: BuildPlan, centre: { x: number; z: number }): { x: number; z: number } {
-    const { cellX, cellZ, size } = plan.site;
+  private standingSpot(site: BuildSite, centre: { x: number; z: number }): { x: number; z: number } {
+    const { cellX, cellZ, size } = site;
     const midX = cellX + size / 2;
     const midZ = cellZ + size / 2;
     const dx = centre.x - midX;
@@ -675,6 +717,151 @@ export class Agent {
       return { x: dx > 0 ? cellX + size + 1.2 : cellX - 1.2, z: centre.z };
     }
     return { x: centre.x, z: dz > 0 ? cellZ + size + 1.2 : cellZ - 1.2 };
+  }
+
+  /** Stops working on the current build; hands it on if others are still at it. */
+  private leaveProject(why: string): void {
+    const project = this.project;
+    if (project == null) {
+      return;
+    }
+    const heir = project.leave(this.id);
+    this.services.log(
+      this,
+      "build",
+      `${why} ${project.title}${heir != null ? `; ${project.ownerName} carries on` : ""}`,
+    );
+    this.project = null;
+    this.goal = null;
+    if (this.mind.mode === "BUILD") {
+      this.mind = { ...this.mind, mode: "IDLE", since: performance.now() };
+    }
+  }
+
+  /** Joins another agent's build. */
+  private joinProject(project: BuildProject): void {
+    if (this.project === project) {
+      return;
+    }
+    this.leaveProject("Left");
+    project.join(this.id, this.name);
+    this.project = project;
+    this.goal = `help ${project.ownerName} build ${project.title}`;
+    this.staying = false;
+    this.mind = { ...this.mind, mode: "BUILD", since: performance.now(), following: false };
+    this.services.log(this, "build", `Joined ${project.ownerName} building ${project.title}`);
+  }
+
+  /** Unfinished builds by other agents nearby, to offer as something to join. */
+  private joinableProjects(): BuildProject[] {
+    return this.services.projects
+      .near(this.levelKey, this.body.x, this.body.z, JOIN_RANGE)
+      .filter((project) => project !== this.project && !project.members.has(this.id))
+      .slice(0, 2);
+  }
+
+  // ── Looking at a build (the "look and continue" loop) ──────────────────
+
+  /** Whether the owner may still take a look: query published, looks left. */
+  private mayReview(project: BuildProject): boolean {
+    return hasQuery("review") && this.brainDisabled == null && project.reviews < MAX_REVIEWS;
+  }
+
+  private considerReview(project: BuildProject): void {
+    if (project.reviewing || !this.mayReview(project) || !this.canAsk("review")) {
+      return;
+    }
+    const due =
+      project.placedCount > 0 &&
+      (project.remaining === 0 || project.placedCount - project.reviewedAt >= REVIEW_EVERY);
+    if (due) {
+      void this.review(project);
+    }
+  }
+
+  /** What stands on the site now, by site cell, with its colour. */
+  private standingOn(site: BuildSite): Map<string, string> {
+    const world = this.view.state().world;
+    const occupied = new Map<string, string>();
+    for (let dx = 0; dx < site.size; dx++) {
+      for (let dz = 0; dz < site.size; dz++) {
+        for (let dy = 0; dy < MAX_LAYERS; dy++) {
+          const centre = cubeCentre(world, site, { dx, dy, dz });
+          const cube = world.voxels.get(voxelKey(cellOf(centre.x), cellOf(centre.y), cellOf(centre.z)));
+          if (cube != null) {
+            occupied.set(`${dx},${dy},${dz}`, cube.color);
+          }
+        }
+      }
+    }
+    return occupied;
+  }
+
+  /**
+   * Shows the owner what is actually standing, and lets it carry on, take
+   * something out, or call it done — the feedback loop that makes a build
+   * more than one blind blueprint.
+   */
+  private async review(project: BuildProject): Promise<void> {
+    project.reviewing = true;
+    try {
+      const standing = this.standingOn(project.site);
+      const room = MAX_PROJECT_CUBES - project.total;
+      const prompt = buildReviewPrompt({
+        agentName: this.name,
+        goal: project.goal,
+        title: project.title,
+        siteSize: project.site.size,
+        palette: project.palette,
+        picture: drawSite(standing, project.site.size, project.palette),
+        placed: project.placedCount,
+        queued: project.remaining,
+        helpers: project.helpersOf(this.id),
+        reviewsLeft: MAX_REVIEWS - project.reviews - 1,
+        maxCubes: Math.max(0, room),
+      });
+      const text = await this.ask("review", prompt);
+      project.reviews++;
+      project.reviewedAt = project.placedCount;
+      const review =
+        text == null
+          ? null
+          : parseReview(
+              text,
+              project.site.size,
+              project.palette,
+              new Set(standing.keys()),
+              Math.max(0, room),
+              project.queuedKeys(),
+            );
+      if (review == null) {
+        this.services.log(this, "llm", `look at ${project.title}: no usable answer`);
+        return;
+      }
+      project.palette = review.palette;
+      const markIds = project.remove(review.remove);
+      if (markIds.length > 0) {
+        this.services.eraseMarks(this, markIds);
+      }
+      project.append(review.add);
+      this.services.log(
+        this,
+        "build",
+        `Looked at ${project.title}: ${review.done ? "done" : "carry on"}` +
+          `${review.add.length > 0 ? `, +${review.add.length} cubes` : ""}` +
+          `${markIds.length > 0 ? `, −${markIds.length}` : ""}` +
+          `${review.note !== "" ? ` — ${review.note}` : ""}`,
+      );
+      if (review.done) {
+        // Let what is already queued go up, then stop looking.
+        project.reviews = MAX_REVIEWS;
+        if (project.remaining === 0) {
+          project.finish();
+        }
+      }
+    } finally {
+      project.reviewing = false;
+    }
   }
 
   // ── Layer 3: the brain queries ─────────────────────────────────────────
@@ -764,7 +951,7 @@ export class Agent {
     const prompt = buildReplyPrompt({
       agentName: this.name,
       goal: this.goal,
-      building: this.plan?.title ?? null,
+      building: this.project?.title ?? null,
       messages,
       greet: greet != null ? plainName(greet.userId) : null,
       people: this.others()
@@ -777,6 +964,7 @@ export class Agent {
       conversation: this.conversation,
       memories,
       actions: this.replyActions(),
+      actionNotes: this.actionNotes(),
     });
 
     const text = await this.ask("reply", prompt);
@@ -839,10 +1027,21 @@ export class Agent {
     if (this.view.geometry.buildable) {
       actions.push("build");
     }
-    if (this.plan != null) {
+    if (this.project != null) {
       actions.push("stop_building");
     }
+    if (this.joinableProjects().length > 0) {
+      actions.push("help_build");
+    }
     return actions;
+  }
+
+  /** Makes the offered actions specific: which build helping means. */
+  private actionNotes(): Partial<Record<ReplyAction, string>> {
+    const [nearest] = this.joinableProjects();
+    return nearest == null
+      ? {}
+      : { help_build: `go and help ${nearest.ownerName} build ${nearest.title}` };
   }
 
   /**
@@ -887,18 +1086,18 @@ export class Agent {
         this.mind = { ...this.mind, mode: "EXPLORE", since: now, partner: null, following: false };
         return;
       case "stop_building":
-        if (this.plan != null) {
-          this.services.log(this, "build", `Stopped building ${this.plan.title}`);
-        }
-        this.plan = null;
-        this.goal = null;
-        if (this.mind.mode === "BUILD") {
-          this.mind = { ...this.mind, mode: "IDLE", since: now };
+        this.leaveProject("Stopped building");
+        return;
+      case "help_build": {
+        const [nearest] = this.joinableProjects();
+        if (nearest != null) {
+          this.joinProject(nearest);
         }
         return;
+      }
       case "build":
         this.staying = false;
-        this.plan = null;
+        this.leaveProject("Put down");
         this.goal = `build ${build ?? "something small"}`;
         this.mind = { ...this.mind, following: false };
         // Near whoever asked, so they can watch it go up.
@@ -986,7 +1185,7 @@ export class Agent {
         IDLE: "Rest here for a while and watch.",
         EXPLORE: "Wander off somewhere new.",
         SOCIAL: "Go and talk to the nearest person.",
-        BUILD: this.plan != null ? `Carry on building ${this.plan.title}.` : "Start building something.",
+        BUILD: this.project != null ? `Carry on building ${this.project.title}.` : "Start building something.",
         REACTING: "",
       }[mode],
     }));
@@ -1012,33 +1211,27 @@ export class Agent {
     }
   }
 
-  /** Picks a goal from options built from the persona and the moment. */
+  /**
+   * Picks a goal from options built from the persona and the moment: one of
+   * its own interests, joining another agent's build nearby, or exploring.
+   */
   private async chooseGoal(): Promise<void> {
-    const partner = this.mind.partner;
-    const lastAsk =
-      partner != null
-        ? [...this.recentChat].reverse().find((message) => message.sessionId === partner.sessionId)
-        : undefined;
-    const options: DecideOption[] = [];
-    if (partner != null) {
-      options.push({
-        key: "help",
-        label: `Build what ${plainName(partner.userId)} asked for, next to them${lastAsk != null ? ` ("${lastAsk.text}")` : ""}.`,
-      });
-    }
-    if (this.view.geometry.buildable) {
-      this.persona.interests.forEach((interest, index) => {
-        options.push({ key: `build-${index + 1}`, label: `Build ${interest} somewhere nearby.` });
-      });
-    } else {
-      // Nothing may be built in this room; saying so beats a plan nobody can place.
-      options.length = 0;
-    }
-    if (options.length === 0) {
+    if (!this.view.geometry.buildable) {
       this.services.log(this, "llm", "goal: nothing can be built in this room");
       return;
     }
-    options.push({ key: "explore", label: "Nothing to build right now; go and explore instead." });
+    const joinable = this.joinableProjects();
+    const options: DecideOption[] = [
+      ...joinable.map((project, index) => ({
+        key: `join-${index + 1}`,
+        label: `Help ${project.ownerName} build ${project.title}, just nearby.`,
+      })),
+      ...this.persona.interests.map((interest, index) => ({
+        key: `build-${index + 1}`,
+        label: `Build ${interest} somewhere nearby.`,
+      })),
+      { key: "explore", label: "Nothing to build right now; go and explore instead." },
+    ];
 
     const prompt = buildDecidePrompt({
       agentName: this.name,
@@ -1052,16 +1245,18 @@ export class Agent {
       this.services.log(this, "llm", `goal: explore${decision != null ? ` — ${decision.why}` : ""}`);
       return;
     }
-
-    if (decision.choice === "help" && partner != null) {
-      this.goal = `help ${plainName(partner.userId)} build${lastAsk != null ? ` what they asked for: "${lastAsk.text}"` : " something"}`;
-    } else {
-      const index = Number(decision.choice.replace("build-", "")) - 1;
-      this.goal = `build ${this.persona.interests[index] ?? "something small"}`;
+    if (decision.choice.startsWith("join-")) {
+      const project = joinable[Number(decision.choice.slice(5)) - 1];
+      if (project != null && !project.done) {
+        this.services.log(this, "llm", `goal: ${decision.why}`);
+        this.joinProject(project);
+      }
+      return;
     }
+    const index = Number(decision.choice.replace("build-", "")) - 1;
+    this.goal = `build ${this.persona.interests[index] ?? "something small"}`;
     this.services.log(this, "llm", `goal: ${this.goal} — ${decision.why}`);
-    // The plan gap is long; wait for the decide call to finish first.
-    await this.requestPlan(decision.choice === "help" ? partner : null);
+    await this.requestPlan(null);
   }
 
   private async requestPlan(near: { sessionId: string } | null): Promise<void> {
@@ -1106,14 +1301,24 @@ export class Agent {
       this.goal = null;
       return;
     }
-    this.plan = plan;
-    this.placed = 0;
+    const project = new BuildProject({
+      ownerId: this.id,
+      ownerName: this.name,
+      levelKey: this.levelKey,
+      site: plan.site,
+      title: plan.title,
+      goal,
+      palette: plan.palette,
+      cubes: plan.cubes,
+    });
+    this.services.projects.add(project);
+    this.project = project;
     this.buildRouteFailures = 0;
     this.services.log(
       this,
       "build",
       `Plan: ${plan.title}, ${plan.cubes.length} cubes on site ${plan.site.key}` +
-        (plan.discarded > 0 ? ` (${plan.discarded} invalid cubes dropped)` : ""),
+        (plan.discarded > 0 ? ` (${plan.discarded} unbuildable cubes dropped)` : ""),
     );
     const now = performance.now();
     this.mind = { ...this.mind, mode: "BUILD", since: now, following: false };
@@ -1148,9 +1353,10 @@ export class Agent {
   }
 
   private planSummary(): { title: string; placed: number; total: number } | null {
-    return this.plan == null
+    const project = this.project;
+    return project == null
       ? null
-      : { title: this.plan.title, placed: this.placed, total: this.plan.cubes.length };
+      : { title: project.title, placed: project.placedCount, total: project.total };
   }
 
   private situationLines(): string[] {

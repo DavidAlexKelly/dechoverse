@@ -210,19 +210,6 @@ describe("conversations ending", () => {
     );
     expect(intents).toContainEqual({ type: "approach", sessionId: DANA.sessionId });
   });
-
-  test("asked to build together: choose a goal, once", () => {
-    const first = decide(
-      mind({ mode: "SOCIAL", partner: DANA, lastHeardAt: 9000, since: 9000 }),
-      situation({ partnerDistance: 3, reflexes: reflexes({ wantsCollaboration: 0.9 }) }),
-    );
-    expect(types(first.intents)).toContain("chooseGoal");
-    const second = decide(
-      first.state,
-      situation({ now: 12000, partnerDistance: 3, reflexes: reflexes({ wantsCollaboration: 0.9 }) }),
-    );
-    expect(types(second.intents)).not.toContain("chooseGoal");
-  });
 });
 
 describe("switching modes on Jev's suggestion", () => {
