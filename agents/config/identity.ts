@@ -27,6 +27,26 @@ export function agentSessionId(agentId: string): string {
   return `${AGENT_SESSION_PREFIX}${agentId}:${crypto.randomUUID().slice(0, 8)}`;
 }
 
+/**
+ * Whether a line is addressed to someone by name.
+ *
+ * People shorten names: "French Claude" gets called "Claude", "Big Dave"
+ * gets "Dave". So the whole name counts, and so does any single word of it
+ * four letters or longer, as a whole word. Short words are left out because
+ * they are usually adjectives that turn up in ordinary speech ("big", "sad").
+ */
+export function mentionsName(text: string, name: string): boolean {
+  const said = ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ")} `;
+  const full = name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  if (full !== "" && said.includes(` ${full} `)) {
+    return true;
+  }
+  return full
+    .split(" ")
+    .filter((word) => word.length >= 4)
+    .some((word) => said.includes(` ${word} `));
+}
+
 /** The name without the suffix, for prompts. */
 export function plainName(userId: string): string {
   return userId.endsWith(AGENT_NAME_SUFFIX)
