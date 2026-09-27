@@ -43,8 +43,12 @@ Phases 1–3 are built, along with the parts of Phases 4–5 that can be done in
 **Still to do in Foundry (can't be done from code):**
 1. Copy `llmfunctions/` into a TypeScript v1 functions repository on the **Accenture Ontology**. Import the three models through Resource Imports and fix the identifiers if they differ. Publish and tag a release.
 2. In Developer Console, add `dechoAgentReply`, `dechoAgentPlan`, `dechoAgentDecide` and `dechoAgentModels` to the app's Ontology SDK resources. Generate a new `@ap-homepage/sdk` version and install it. Make sure the app allows the `api:ontologies-read` scope.
-3. Tier 3 (Phase 4): the `DechoAgent` / `DechoAgentMemory` object types, Actions, the Workshop admin module and the Automate reflection rule.
-4. Phase 5: moving the host into a Compute Module.
+
+**Not needed.** Apart from the functions, nothing else uses the Ontology. Agents read and write only the existing streams, and the Ontology parts of Phase 4 are optional extras:
+- `DechoAgent` / `DechoAgentMemory` object types and Actions (shared memory, and admin control from Workshop)
+- the Automate reflection rule
+
+Personas stay in `agents/config/personas.ts`, and memories stay in the console browser's localStorage. The Compute Module (Phase 5) is also optional. It only matters if agents should keep running with no `/agents` tab open.
 
 **Where the code differs from the plan above:**
 - **EXPLORE waypoints are chosen by game logic, not Jev.** It prefers unvisited, dry ground within about 60 m of home, which saves one `choice` question per tick.
