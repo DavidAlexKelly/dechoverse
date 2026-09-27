@@ -1,0 +1,142 @@
+/* Sits inside a chooser panel, so it brings no frame or placement of its own. */
+.wheelPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* The wheel and the opacity track, side by side. */
+.wheelRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.wheelHit {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: crosshair;
+  line-height: 0;
+}
+
+.wheel {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  cursor: crosshair;
+  background:
+    radial-gradient(circle, #ffffff 0%, rgba(255, 255, 255, 0) 70%),
+    conic-gradient(
+      hsl(0, 100%, 50%),
+      hsl(60, 100%, 50%),
+      hsl(120, 100%, 50%),
+      hsl(180, 100%, 50%),
+      hsl(240, 100%, 50%),
+      hsl(300, 100%, 50%),
+      hsl(360, 100%, 50%)
+    );
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.wheelCentre {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(10, 8, 18, 0.9);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.wheelPresets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 108px;
+}
+
+.wheelPreset {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wheelPresetActive {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+.opacityColumn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+/*
+ * A checkerboard, so the faint end of the track reads as see-through rather
+ * than as a darker shade of the same colour. The colour itself is laid over
+ * this as a gradient, inline, since it changes with the wheel.
+ */
+.opacityTrack {
+  position: relative;
+  width: 22px;
+  height: 108px;
+  border-radius: 4px;
+  cursor: crosshair;
+  background-image:
+    linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.18) 25%,
+      transparent 25%,
+      transparent 75%,
+      rgba(255, 255, 255, 0.18) 75%
+    ),
+    linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.18) 25%,
+      transparent 25%,
+      transparent 75%,
+      rgba(255, 255, 255, 0.18) 75%
+    );
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    4px 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.opacityFill {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.opacityHandle {
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  height: 3px;
+  transform: translateY(50%);
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: 0 0 4px rgba(4, 3, 8, 0.8);
+  pointer-events: none;
+}
+
+.opacityValue {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #8f7fb0;
+}

@@ -1,0 +1,103 @@
+/*
+ * Text drawn inside the 3D scene through drei's Html: block captions, player
+ * name plates and speech bubbles. Shared by the layers that hang labels on
+ * things, which is why it is not a module per component.
+ */
+
+.blockLabel {
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(10, 8, 18, 0.75);
+  border: 1px solid rgba(161, 0, 255, 0.6);
+  color: #f2ecff;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.blockCaption {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a396c4;
+}
+
+.avatarLabel {
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  padding: 3px 9px;
+  border: 1px solid;
+  border-radius: 10px;
+  background: rgba(10, 8, 18, 0.8);
+  color: #f2ecff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.speechBubble {
+  pointer-events: none;
+  user-select: none;
+  /*
+   * The width must be definite, not shrink-to-fit. drei's Html wrapper is an
+   * absolutely positioned, transformed element that gives its child no usable
+   * containing-block width, so a box sized only by max-width collapses to
+   * nearly nothing and the text wraps one character per line. max-content
+   * resolves against the content instead, keeping short messages tight while
+   * max-width still caps long ones and lets them wrap normally.
+   *
+   * The other two Html labels in this file sidestep the same problem with
+   * white-space: nowrap, which is not an option for a message that can run to
+   * 200 characters.
+   */
+  width: max-content;
+  max-width: 220px;
+  position: relative;
+  padding: 7px 11px;
+  border: 1px solid #000000;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0a0812;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  /* Only break inside a word when the word itself cannot fit. */
+  overflow-wrap: break-word;
+}
+
+/*
+ * The tail, as two stacked triangles: a black one and a slightly smaller
+ * white one sitting a little higher. The white triangle covers the middle of
+ * the black one, leaving a 1px black edge down both slopes, and overlaps the
+ * bubble's own bottom border so the tail reads as part of the bubble instead
+ * of a shape glued underneath it.
+ */
+.speechBubble::before,
+.speechBubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-style: solid;
+  border-color: transparent;
+}
+
+.speechBubble::before {
+  bottom: -9px;
+  border-width: 9px 7px 0 7px;
+  border-top-color: #000000;
+}
+
+.speechBubble::after {
+  bottom: -7px;
+  border-width: 8px 6px 0 6px;
+  border-top-color: #ffffff;
+}

@@ -1,0 +1,15 @@
+/* Drawn by the game while the pointer is locked, so menus stay clickable
+   without handing the cursor back to the desktop. */
+.virtualCursor {
+  position: fixed;
+  z-index: 999;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid #f2ecff;
+  border-radius: 50%;
+  background: rgba(161, 0, 255, 0.55);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.65);
+  /* Must not be hit-testable, or elementFromPoint only ever finds itself. */
+  pointer-events: none;
+}

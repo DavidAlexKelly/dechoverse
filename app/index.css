@@ -1,0 +1,27 @@
+@import "normalize.css";
+
+:root {
+  font-family: "Inter", "Source Sans Pro", system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+ * The app is a full-bleed 3D canvas with a HUD over it, so the page itself
+ * carries no layout: no centred column, no padding, and nothing that can
+ * scroll. (This used to be the bootstrapped template's centred 1280px card,
+ * which the canvas escaped by being position: fixed.)
+ */
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #0a0812;
+}
+
+#root-container,
+#root {
+  height: 100%;
+}

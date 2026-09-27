@@ -1,0 +1,102 @@
+/*
+ * The character screen: a turning preview of your avatar beside the colour
+ * wheel and the hat grid.
+ *
+ * Wider than the tool choosers, because it holds two columns rather than one
+ * grid — so it does not reuse the picker panel, only the grid inside it.
+ */
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 3, 8, 0.72);
+}
+
+.panel {
+  width: min(880px, 92vw);
+  max-height: 84vh;
+  overflow-y: auto;
+  padding: 20px 22px;
+  border: 1px solid rgba(161, 0, 255, 0.6);
+  border-radius: 6px;
+  background: rgba(12, 10, 20, 0.98);
+  color: #f2ecff;
+}
+
+.header {
+  margin-bottom: 16px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #8f7fb0;
+}
+
+.columns {
+  display: grid;
+  /* The preview is a fixed stage; the controls take whatever is left. */
+  grid-template-columns: 260px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * The preview canvas needs a definite height: a WebGL canvas sizes itself to
+ * its container, and a container sized by its content would collapse to
+ * nothing and take the canvas with it.
+ */
+.preview {
+  height: 320px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: #0c0a14;
+  overflow: hidden;
+}
+
+.controls {
+  min-width: 0;
+}
+
+.sectionLabel {
+  margin: 4px 0 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8f7fb0;
+}
+
+.close {
+  display: block;
+  margin: 18px 0 0 auto;
+  padding: 7px 16px;
+  border: 1px solid rgba(161, 0, 255, 0.7);
+  border-radius: 4px;
+  background: rgba(161, 0, 255, 0.2);
+  color: #f2ecff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: rgba(161, 0, 255, 0.35);
+}

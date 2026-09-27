@@ -1,0 +1,236 @@
+/*
+ * The chooser shell — backdrop, panel, heading, tabs and the grid of things
+ * you can pick — shared by every picker through PickerShell.
+ */
+
+.pickerBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 3, 8, 0.72);
+}
+
+.pickerPanel {
+  width: min(720px, 88vw);
+  max-height: 76vh;
+  overflow-y: auto;
+  padding: 20px 22px;
+  border: 1px solid rgba(161, 0, 255, 0.6);
+  border-radius: 6px;
+  background: rgba(12, 10, 20, 0.98);
+  color: #f2ecff;
+}
+
+.pickerTitle {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.pickerSubtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #8f7fb0;
+}
+
+.pickerEmpty {
+  margin-top: 20px;
+  font-size: 13px;
+  color: #8f7fb0;
+}
+
+.pickerGrid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.pickerItem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pickerItemActive {
+  border-color: #ffd166;
+  background: rgba(255, 209, 102, 0.14);
+}
+
+.pickerThumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 84px;
+  border-radius: 3px;
+  background: repeating-conic-gradient(#201c2e 0% 25%, #171326 0% 50%) 50% / 14px 14px;
+  overflow: hidden;
+}
+
+.pickerThumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Rendered from the model itself, so it fills the thumb rather than sitting
+   in it like a glyph does. */
+.pickerThumbImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.pickerLoading {
+  color: #6f6390;
+  font-size: 18px;
+}
+
+.pickerName {
+  font-size: 11px;
+  color: #c6b3e8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.objectGlyph {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.objectCaption {
+  margin-top: 2px;
+  font-size: 10px;
+  color: #8f7fb0;
+}
+
+/* Create picker tabs, one per model pack folder. */
+
+.pickerTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(161, 0, 255, 0.25);
+}
+
+.pickerTab {
+  padding: 5px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: transparent;
+  color: #c6b3e8;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.pickerTab:hover {
+  border-color: rgba(161, 0, 255, 0.6);
+  color: #f2ecff;
+}
+
+.pickerTabActive {
+  border-color: #a100ff;
+  background: rgba(161, 0, 255, 0.18);
+  color: #f2ecff;
+}
+
+.pickerSubTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 10px 0 2px;
+}
+
+.pickerSubTab {
+  padding: 4px 9px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #8d80ad;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pickerSubTab:hover {
+  color: #f2ecff;
+}
+
+/* Used where a sub-tab is not applicable yet — painting a hat nobody is
+   wearing — so it reads as unavailable rather than unresponsive. */
+.pickerSubTab:disabled {
+  color: #4b4467;
+  cursor: default;
+}
+
+.pickerSubTab:disabled:hover {
+  color: #4b4467;
+}
+
+.pickerSubTabActive {
+  background: rgba(255, 255, 255, 0.09);
+  color: #f2ecff;
+}
+
+/* The tag picker's "already in the media set" row. */
+
+.pickerImport {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pickerImportLabel {
+  display: block;
+  font-size: 11px;
+  color: #8f7fb0;
+}
+
+.pickerImportRow {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.pickerInput {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f2ecff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.pickerInput:focus {
+  outline: none;
+  border-color: rgba(161, 0, 255, 0.8);
+}
+
+.pickerImportButton {
+  padding: 7px 14px;
+  border: 1px solid rgba(161, 0, 255, 0.7);
+  border-radius: 4px;
+  background: rgba(161, 0, 255, 0.2);
+  color: #f2ecff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
