@@ -1,5 +1,6 @@
 import { Agent, type AgentServices, type AgentSnapshot, type LogKind } from "@/agents/host/Agent";
 import { type JevClient, createJevClient } from "@/agents/brain/jev";
+import { logJevStatus } from "@/agents/brain/jevLog";
 import type { Persona } from "@/agents/config/personas";
 import type { AgentModelName } from "@/agents/data/brainClient";
 import { ProjectBoard } from "@/agents/build/project";
@@ -112,6 +113,12 @@ export class AgentHost {
     this.jev = key === "" ? null : createJevClient({ apiKey: key, model: model.trim() || undefined });
     this.jevModel = key === "" ? null : model.trim();
     this.jevError = null;
+    logJevStatus(
+      key !== "",
+      key !== ""
+        ? `${model.trim() || "default model"}, key ending …${key.slice(-4)}`
+        : "switched off",
+    );
     this.notify();
   }
 
@@ -329,6 +336,7 @@ export class AgentHost {
       // calling. Agents fall back to their heuristics until it is fixed.
       this.jev = null;
       this.jevError = message;
+      logJevStatus(false, `stopped after: ${message}`);
       this.notify();
     },
   };

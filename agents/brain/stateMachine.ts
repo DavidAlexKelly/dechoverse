@@ -114,10 +114,14 @@ export const ADDRESSED = 0.7;
 export const MAYBE_ADDRESSED = 0.4;
 /** Jev's mode choice below this confidence is escalated. */
 export const CONFIDENT = 0.55;
-/** An agent answers another agent only if Jev is this sure it is worth it. */
+/**
+ * An agent joins in when another agent is *not* talking to it only if Jev is
+ * this sure it is worth it. Spoken to by name, or by its conversation
+ * partner, it simply answers.
+ */
 export const WORTH_REPLYING = 0.8;
 /** At most this many agent-to-agent turns a minute. */
-export const MAX_AGENT_TURNS = 4;
+export const MAX_AGENT_TURNS = 12;
 /** Conversation partners further than this have walked off. Matches HEARING_RADIUS. */
 export const EARSHOT = 32;
 /** Walk towards the partner when further than this. */
@@ -178,16 +182,21 @@ export function decide(
       ? Math.max(reflexes?.addressedToMe ?? 0, 0.9)
       : reflexes?.addressedToMe ?? null;
 
-    if (addressed == null) {
-      // Nothing to go on yet: wait for Jev's next answer rather than guess.
-    } else if (
+    // Another AI talking to me — by name, or as my conversation partner — is
+    // a conversation, and gets an answer. Ambient AI chatter only draws one
+    // in when Jev says it is worth it. Either way a thread is capped, so two
+    // agents cannot talk forever; a human is never subject to the cap.
+    const agentEngaged = pending.isAgent && (pending.mentionsName || fromPartner);
+    const agentDeclined =
       pending.isAgent &&
       (situation.agentTurns >= MAX_AGENT_TURNS ||
-        (reflexes?.worthReplying ?? 0) < WORTH_REPLYING)
-    ) {
-      // Two agents can talk forever; a human never has to wait on that.
+        (!agentEngaged && (reflexes?.worthReplying ?? 0) < WORTH_REPLYING));
+
+    if (addressed == null && !agentEngaged) {
+      // Nothing to go on yet: wait for Jev's next answer rather than guess.
+    } else if (agentDeclined) {
       intents.push({ type: "ignore", messageKey: pending.key });
-    } else if (addressed >= ADDRESSED || (fromPartner && addressed >= MAYBE_ADDRESSED)) {
+    } else if (agentEngaged || (addressed ?? 0) >= ADDRESSED || (fromPartner && (addressed ?? 0) >= MAYBE_ADDRESSED)) {
       state = {
         ...state,
         partner: { sessionId: pending.sessionId, userId: pending.userId },
@@ -199,7 +208,7 @@ export function decide(
       }
       intents.push({ type: "face", sessionId: pending.sessionId });
       intents.push({ type: "reply", messageKey: pending.key });
-    } else if (addressed >= MAYBE_ADDRESSED && !pending.isAgent) {
+    } else if ((addressed ?? 0) >= MAYBE_ADDRESSED && !pending.isAgent) {
       intents.push({ type: "escalate", topic: "answer", messageKey: pending.key });
     } else {
       intents.push({ type: "ignore", messageKey: pending.key });

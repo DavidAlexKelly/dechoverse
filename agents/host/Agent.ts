@@ -1,6 +1,7 @@
 import { Body, yawTowards } from "@/agents/body/Body";
 import { PoseSampler } from "@/agents/body/poseSampler";
 import { type JevClient, JevError, noul } from "@/agents/brain/jev";
+import { logDecision, logJevAnswer, logJevFailure } from "@/agents/brain/jevLog";
 import { recall, remember } from "@/agents/brain/memory";
 import { parseDecide, parsePlan, parseReply, parseReview } from "@/agents/brain/parse";
 import {
@@ -446,11 +447,14 @@ export class Agent {
       this.stats.jevLatencyMs = Math.round(result.latencyMs);
       this.stats.jevError = null;
       this.services.spent(result.cost);
-      return readReflexes(result.answers);
+      const reflexes = readReflexes(result.answers);
+      logJevAnswer(this.name, this.mind.mode, summary, questions, result, reflexes);
+      return reflexes;
     } catch (error) {
       this.stats.jevFailures++;
       const message = error instanceof Error ? error.message : String(error);
       this.stats.jevError = message;
+      logJevFailure(this.name, message, error instanceof JevError ? error.status : null);
       if (error instanceof JevError && (error.outOfCredits || error.unauthorised)) {
         this.services.jevFatal(message);
       }
@@ -489,6 +493,7 @@ export class Agent {
     const before = this.mind.mode;
     const situation = this.situation(now, reflexes);
     const { state, intents } = decide(this.mind, situation);
+    logDecision(this.name, before, state.mode, intents);
     this.mind = state;
     if (state.mode !== before) {
       this.services.log(this, "mode", `${before} → ${state.mode}`);

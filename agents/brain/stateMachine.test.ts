@@ -141,6 +141,26 @@ describe("talking while busy", () => {
 });
 
 describe("agents talking to agents", () => {
+  test("an AI that names me gets an answer, whatever Jev thinks of it", () => {
+    const { intents } = decide(
+      mind(),
+      situation({
+        pending: message({ sessionId: "agent:pixel:1", userId: "Pixel 🤖", isAgent: true, mentionsName: true }),
+        reflexes: reflexes({ worthReplying: 0.1 }),
+      }),
+    );
+    expect(types(intents)).toContain("reply");
+  });
+
+  test("so does my AI conversation partner, even with Jev off", () => {
+    const pixel = { sessionId: "agent:pixel:1", userId: "Pixel 🤖" };
+    const { intents } = decide(
+      mind({ mode: "SOCIAL", partner: pixel, lastHeardAt: 9000, since: 9000 }),
+      situation({ pending: message({ ...pixel, isAgent: true }), reflexes: null, partnerDistance: 4 }),
+    );
+    expect(types(intents)).toContain("reply");
+  });
+
   const fromAgent = message({ sessionId: "agent:pixel:1", userId: "Pixel 🤖", isAgent: true });
 
   test("only when Jev thinks it is worth it", () => {
@@ -158,7 +178,7 @@ describe("agents talking to agents", () => {
       situation({
         pending: fromAgent,
         reflexes: reflexes({ addressedToMe: 0.95, worthReplying: 0.95 }),
-        agentTurns: 4,
+        agentTurns: 12,
       }),
     );
     expect(types(intents)).not.toContain("reply");
