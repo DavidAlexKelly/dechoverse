@@ -294,35 +294,103 @@ export class DechoAgentFunctions {
 - TS v1 functions have a **60 s** wall-clock limit by default, which can be changed in the function's configuration, and a fixed **30 s** CPU limit. Waiting on a model is I/O, not CPU, so fast models finish well inside both.
 - LLM calls are **metered as AIP compute** per token and **rate-limited per enrollment and per model** (TPM/RPM), on top of the function's own limits. The §8 budgets keep a room of agents far below those limits.
 
-#### C2. Calling the queries from the app
+#### C2. Calling the queries from the app: the generated OSDK, as in `commanderClient.ts`
 
-Dechoverse only has a `PlatformClient`, and that is enough: execute the query through the **ontology-scoped** endpoint, which is GA and the one a TS v1 query uses. No generated OSDK package is needed. Put this in `foundry/agentQueries.ts`:
+⚠ **Queries are ontology-scoped.** The endpoint is `POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute`, in the ontologies service. It is **not** `/v2/functions/queries/{name}/execute`, which returns a 404 `QueryNotFound` that looks exactly like an unpublished function. BGWS lost four debugging rounds to this. The fix is to call queries through the **generated OSDK**, which knows the Ontology, the API names and the parameter types, so none of them can be wrong.
+
+**1. Add an OSDK `Client` next to the existing `PlatformClient`** in `foundry/client.ts`. Both share the same `auth`, and the stream and dataset code keeps using `PlatformClient` unchanged:
 
 ```ts
-import { Queries } from "@osdk/foundry.ontologies";
-import client from "@/foundry/client";
+import { type Client, createClient, createPlatformClient } from "@osdk/client";
+import { $ontologyRid } from "@dechoverse/sdk";   // the package generated in Developer Console
 
-/** The Ontology the Dechoverse Agent Brains repository is on (§9, Phase 0). */
-export const DECHO_ONTOLOGY_RID = "ri.ontology.main.ontology.…";
+export const client: PlatformClient = createPlatformClient(foundryUrl, auth);   // streams, datasets (unchanged)
+export const ontologyClient: Client = createClient(foundryUrl, $ontologyRid, auth); // queries, objects, actions
+```
 
-export type AgentModel = "claude-haiku-4-5" | "gpt-5-mini" | "gemini-2-5-flash";
-type AgentQuery = "dechoAgentReply" | "dechoAgentPlan" | "dechoAgentDecide";
+**2. Create `agents/data/brainClient.ts`**, the one impure function behind an agent's brain. It follows the same design as `bgws/data/commanderClient.ts`:
+- `prompts.ts` / `parse.ts` are pure, and all they need is a `ModelCall = (prompt: string) => Promise<string>`.
+- It looks queries up **by name at runtime**, not by named import. A named import of a query the SDK doesn't have yet fails the build. Looked up at runtime, a new brief (say `dechoAgentPlan`) takes over once the SDK is regenerated, and until then the caller gets a clear error rather than a broken build.
+- It reports **everything the platform said**: `errorCode`, `errorName`, `parameters` and `errorInstanceId`. The OSDK's default "Failed to fetch 400 Bad Request" doesn't help. Extend the existing `describeError` in `foundry/errors.ts` to match `describeApiError`.
+- It flags **permission problems** as their own error with a fix-it message ("add *[DV] Dechoverse Agent Brains* as a permitted resource on this app in Developer Console").
+- It **refuses non-string results**. The contract is a string, and anything else means the published query and the caller have drifted.
 
-/** Raw completion text; "" means unanswered, not "chose to do nothing". */
-export async function askAgentBrain(
-  query: AgentQuery, prompt: string, model: AgentModel, persona: string,
-): Promise<string> {
-  const { value } = await Queries.execute(client, DECHO_ONTOLOGY_RID, query, {
-    parameters: { prompt, model, persona },
-  });
-  return typeof value === "string" ? value : "";
+```ts
+import * as sdk from "@dechoverse/sdk";
+import { ontologyClient } from "@/foundry/client";
+import { describeError } from "@/foundry/errors";
+import type { ModelCall } from "@/agents/brain/prompts";
+
+/** Models the published queries accept. Kept in step with dechoAgentModels by hand. */
+export const AGENT_MODELS = ["claude-haiku-4-5", "gpt-5-mini", "gemini-2-5-flash"] as const;
+export type AgentModelName = (typeof AGENT_MODELS)[number];
+
+export type BrainQueryKind = "reply" | "plan" | "decide";
+const QUERY_NAMES: Record<BrainQueryKind, string> = {
+  reply: "dechoAgentReply",
+  plan: "dechoAgentPlan",
+  decide: "dechoAgentDecide",
+};
+
+type ExecutableQuery = Parameters<typeof ontologyClient>[0];
+
+/** Looked up by name, not imported: see above. */
+function queryFor(kind: BrainQueryKind): { query: ExecutableQuery; name: string } {
+  const name = QUERY_NAMES[kind];
+  const found = (sdk as unknown as Record<string, unknown>)[name];
+  if (!found) {
+    throw new BrainCallError(
+      `${name} is not in the generated SDK yet. Publish the functions and regenerate the SDK.`, false);
+  }
+  return { query: found as ExecutableQuery, name };
+}
+
+export class BrainCallError extends Error {
+  constructor(message: string, readonly permissionDenied: boolean) {
+    super(message);
+    this.name = "BrainCallError";
+  }
+}
+
+const looksLikePermissionProblem = (err: unknown): boolean =>
+  /permission|denied|403|forbidden|scope|unauthor/i.test(String((err as Error)?.message ?? err));
+
+/** Model and persona are bound per agent: an agent's brain does not change mid-conversation. */
+export function foundryModelCall(model: AgentModelName, persona: string, kind: BrainQueryKind): ModelCall {
+  return async (prompt) => {
+    const { query, name } = queryFor(kind);
+    let result: unknown;
+    try {
+      result = await ontologyClient(query).executeFunction({ prompt, model, persona });
+    } catch (err) {
+      const denied = looksLikePermissionProblem(err);
+      throw new BrainCallError(
+        denied
+          ? `No access to "${name}". Add [DV] Dechoverse Agent Brains as a permitted resource on this app in Developer Console.`
+          : `Brain query ${name} failed: ${describeError(err)}`,
+        denied,
+      );
+    }
+    if (typeof result !== "string") {
+      throw new BrainCallError(`Expected a string from ${name}, got ${typeof result}. The published query and this caller may have drifted.`, false);
+    }
+    return result;   // "" = unanswered; parse.ts treats it as such
+  };
 }
 ```
 
-- **Endpoint:** `POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute`, with body `{ parameters }` and response `{ value }`. API-named queries always run the **latest tagged version**, so tag a release to ship a brief change.
-- **Scope:** add `api:ontologies-read` to `scopes` in `foundry/client.ts`. If the Developer Console app uses restricted `api:use-*` scopes, use `api:use-ontologies-read` instead. Everyone signs in again after a scope change.
-- **Developer Console:** on the **Ontology SDK** tab, choose *"Yes, generate an Ontology SDK"* and pick the Ontology. **The Ontology cannot be changed afterwards.** Then add the four queries as resources. Operators also need view permission on the functions repository's project.
-- **Once the Ontology SDK exists** (Tier 3), `client(dechoAgentReply).executeFunction({...})` from the generated package is equivalent, because OSDK calls this same endpoint internally.
+**3. Handle errors in the agent.**
+- A `BrainCallError` with `permissionDenied` **stops that agent** and shows the message on `/agents`, because retrying won't fix a missing grant.
+- Any other failure leaves the agent silent for that exchange, counts one failure, and backs off (2 s, then 4 s, then 8 s).
+
+**Setup** (details in §9, Phase 0):
+- **Developer Console:** on the **Ontology SDK** tab, choose *"Yes, generate an Ontology SDK"* and pick the Ontology the brains repository is on. **The Ontology cannot be changed afterwards.**
+  - Add the four queries as resources, so they become permitted resources and appear in the generated package.
+  - Install the package with the npm instructions on the SDK's page.
+  - **Regenerate the SDK whenever a query is added or its signature changes.**
+- **Scope:** add `api:ontologies-read` to `scopes` in `foundry/client.ts`, or `api:use-ontologies-read` if the console shows restricted scopes. Everyone signs in again after a scope change.
+- **Versions:** API-named queries always run the **latest tagged version**, so tag a release to ship a brief change.
+- **Permissions:** operators also need view permission on the functions repository's project.
 
 #### C3. What the app builds and validates (`agents/brain/prompts.ts`, `agents/brain/parse.ts`)
 
@@ -461,11 +529,10 @@ Until Tier 3, personas live in `agents/config/personas.ts` and memories live in 
 - **Actions:**
   - Add **submission criteria** so only a Dechoverse admins group can spawn, enable, mute or re-goal agents.
   - When a `dechoAgentReply` result has a non-null `remember`, the host applies `remember-fact`.
-- **The host reads them with the same PlatformClient:**
-  - `OntologyObjectsV2.list` / `search` from `@osdk/foundry.ontologies` for `DechoAgent`, on start and every 30 s.
-  - The last 5 `DechoAgentMemory` objects where `aboutUser` is the speaker, when building a reply prompt.
-  - `Actions.apply` for `remember-fact`.
-  - Once the generated OSDK is in, `client(DechoAgent).fetchPage()` and `client(rememberFact).applyAction(...)` do the same job.
+- **The host uses the same generated OSDK and `ontologyClient` as the brain queries (§3C2).** Add the new object types and actions to the Ontology SDK resources and regenerate the SDK. Then:
+  - `ontologyClient(DechoAgent).fetchPage()` on start and every 30 s.
+  - `ontologyClient(DechoAgentMemory).where({ agentId, aboutUser: speaker }).fetchPage({ $pageSize: 5 })` when building a reply prompt.
+  - `ontologyClient(rememberFact).applyAction({...})` for remembered facts.
   - Scopes needed: `api:ontologies-read` / `api:ontologies-write`, or the `api:use-*` equivalents.
 - **Admin UI:** a small **Workshop** module over `DechoAgent`, so admins can mute, re-goal or swap an agent's model without redeploying.
 - **Reflection:** an **Automate** rule on a **time condition** (at most hourly) runs a function-backed action. The action reads each agent's recent lines from the chat stream archive, calls the same fast model with a "summarise what you learned" brief, and writes new `DechoAgentMemory` objects. Slow, cheap and asynchronous, which is what Automate is good at.
@@ -518,9 +585,9 @@ Docs: [Submission criteria](https://www.palantir.com/docs/foundry/action-types/s
    - Import the three fast models through **Resource Imports → Models** and copy their identifiers.
    - Implement `dechoAgentReply` / `dechoAgentPlan` / `dechoAgentDecide` / `dechoAgentModels` (§3C1).
    - Tag a release.
-3. In Developer Console, **add the four queries** to the Ontology SDK resources. Add `api:ontologies-read` (and `-write` for Tier 3) to the app **and** to `scopes` in `foundry/client.ts`.
+3. In Developer Console, **add the four queries** to the Ontology SDK resources, **generate a new SDK version** and install it. Add `api:ontologies-read` (and `-write` for Tier 3) to the app **and** to `scopes` in `foundry/client.ts`.
 4. **Spike from the hosted site:**
-   - Call `Queries.execute(client, DECHO_ONTOLOGY_RID, "dechoAgentReply", …)` for each model. Record p50/p95 latency; a fast model is expected to take about 1–3 s through a function.
+   - Install the generated SDK, add `ontologyClient` (§3C2), and call `foundryModelCall(model, persona, "reply")("hello")` for each model. Record p50/p95 latency; a fast model is expected to take about 1–3 s through a function.
    - `fetch` `https://openrouter.ai/api/alpha/decisions` with `typesafe/jev-1.13`. **Confirm CORS** and measure latency.
 
 ### Phase 1: a single wandering agent (IDLE ↔ EXPLORE)
@@ -540,7 +607,8 @@ Docs: [Submission criteria](https://www.palantir.com/docs/foundry/action-types/s
      brain/prompts.ts         prompt builders for the three queries (+ tests)
      brain/parse.ts           reply / plan / decide parsers and validators (+ tests)
      config/personas.ts       seed personas and their models, until DechoAgent exists
-   foundry/agentQueries.ts    askAgentBrain → Queries.execute (§3C2)
+     data/brainClient.ts      foundryModelCall → ontologyClient(query).executeFunction (§3C2)
+   foundry/client.ts          + ontologyClient = createClient(foundryUrl, $ontologyRid, auth)
    ```
 3. Add the `/agents` route to `app/router.tsx`. Gate it behind a check that the signed-in user is in the agent-operators list, a hard-coded list until the Ontology exists.
 4. Publish the agent's character on spawn. Walk it with EXPLORE waypoints chosen by Jev (`choice` over the candidate waypoints). Confirm humans see a smooth avatar.
@@ -575,7 +643,7 @@ Docs: [Compute modules](https://www.palantir.com/docs/foundry/compute-modules/ov
 
 | Resource | Where | Phase |
 |---|---|---|
-| Ontology SDK generated on the chosen Ontology (irreversible) | Developer Console → Ontology SDK tab | 0 |
+| Ontology SDK generated on the chosen Ontology (irreversible), regenerated whenever a query/type is added, and installed as `@dechoverse/sdk` (or whatever name the console gives it) | Developer Console → Ontology SDK tab | 0 |
 | *[DV] Dechoverse Agent Brains* TS v1 repository **on that Ontology**, with a tagged release | Code Repositories | 0 |
 | Fast models imported (Haiku, GPT mini, Gemini Flash) | Repository → Resource Imports → Models | 0 |
 | `dechoAgentReply`, `dechoAgentPlan`, `dechoAgentDecide`, `dechoAgentModels` added as app resources | Developer Console → Ontology SDK tab | 0 |
@@ -617,7 +685,7 @@ Docs: [Compute modules](https://www.palantir.com/docs/foundry/compute-modules/ov
   - [Supported LLMs](https://www.palantir.com/docs/foundry/aip/supported-llms)
   - [Manage functions (limits)](https://www.palantir.com/docs/foundry/functions/manage-functions/)
   - [Execute query API](https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/queries/execute-query/)
-  - The `Queries.execute` signature is from `@osdk/foundry.ontologies` in [foundry-platform-typescript](https://github.com/palantir/foundry-platform-typescript).
+  - OSDK `executeFunction` calls `/v2/ontologies/{ontology}/queries/{apiName}/execute` internally (`packages/client/src/queries/applyQuery.ts` in [osdk-ts](https://github.com/palantir/osdk-ts)).
 - **Other Foundry docs:**
   - [Developer Console: create application](https://www.palantir.com/docs/foundry/developer-console/create-application/)
   - [Scopes](https://www.palantir.com/docs/foundry/ontology-sdk/third_party_app_scopes)
@@ -625,6 +693,6 @@ Docs: [Compute modules](https://www.palantir.com/docs/foundry/compute-modules/ov
   - [Custom widgets](https://www.palantir.com/docs/foundry/custom-widgets/overview/)
   - [Automate streaming](https://www.palantir.com/docs/foundry/automate/streaming)
   - [Compute modules](https://www.palantir.com/docs/foundry/compute-modules/overview/)
-- **The BGWS LLM Commanders repository** is the pattern for §3C.
+- **The BGWS LLM Commanders repository and `bgws/data/commanderClient.ts`** are the pattern for §3C.
 
 **Research caveat:** palantir.com, openrouter.ai and docs.typesafe.ai were not directly reachable from the research environment. The facts come from the official SDK source code (foundry-platform-typescript v2.79.0, osdk-ts, `@typesafe-ai/sdk` 0.6.0), a June 2026 mirror of palantir.com/docs, OpenRouter's published skills repository, and search results. Items that could not be confirmed are listed in §11.
