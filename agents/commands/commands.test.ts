@@ -84,7 +84,7 @@ describe("createagent", () => {
     const result = runCommand("createagent gemini Dave a grumpy old builder", context(host));
     expect(result.ok).toBe(true);
     const [{ persona, options }] = host.spawned;
-    expect(options).toMatchObject({ model: "gemini-2-5-flash", levelKey: "world:plains", geometry: PLAINS });
+    expect(options).toMatchObject({ model: "gemini-3-6-flash", levelKey: "world:plains", geometry: PLAINS });
     expect(persona.name).toBe("Dave");
     expect(persona.persona).toContain("a grumpy old builder");
     // yaw 0 faces -Z: three metres ahead of (10, 20).
@@ -96,7 +96,7 @@ describe("createagent", () => {
     const host = fakeHost();
     runCommand("createagent claude A", context(host));
     runCommand("createagent GPT B", context(host));
-    expect(host.spawned.map((entry) => entry.options.model)).toEqual(["claude-haiku-4-5", "gpt-5-mini"]);
+    expect(host.spawned.map((entry) => entry.options.model)).toEqual(["claude-haiku-4-5", "gpt-5-4-mini"]);
   });
 
   test("a default personality when none is given", () => {

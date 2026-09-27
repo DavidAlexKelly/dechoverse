@@ -18,7 +18,7 @@ import { ontologyClient } from "@/foundry/client";
 import { describeApiError } from "@/foundry/errors";
 
 /** Models the published queries accept. Kept in step with llmfunctions by hand. */
-export const AGENT_MODELS = ["claude-haiku-4-5", "gpt-5-mini", "gemini-2-5-flash"] as const;
+export const AGENT_MODELS = ["claude-haiku-4-5", "gpt-5-4-mini", "gemini-3-6-flash"] as const;
 
 export type AgentModelName = (typeof AGENT_MODELS)[number];
 
