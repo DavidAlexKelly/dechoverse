@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { forgetAll, memoryCount } from "@/agents/brain/memory";
 import { agentUserId } from "@/agents/config/identity";
-import { storeJev, storedJevKey, storedJevModel } from "@/agents/config/session";
+import { storeJev, storeJevOff, storedJevKey, storedJevModel } from "@/agents/config/session";
 import { isOperator } from "@/agents/config/operators";
 import { PERSONAS, type Persona } from "@/agents/config/personas";
 import {
@@ -147,7 +147,11 @@ function AgentConsole(): React.ReactElement {
   );
 
   const applyJev = (): void => {
-    storeJev(apiKey, jevModel);
+    if (apiKey.trim() === "") {
+      storeJevOff();
+    } else {
+      storeJev(apiKey, jevModel);
+    }
     host?.configureJev(apiKey, jevModel);
     setNotice(apiKey.trim() === "" ? "Jev switched off: agents use simple heuristics." : "Jev key applied.");
   };

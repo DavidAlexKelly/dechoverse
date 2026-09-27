@@ -1,6 +1,6 @@
 import { agentUserId } from "@/agents/config/identity";
 import type { Persona } from "@/agents/config/personas";
-import { storeJev, storedJevModel } from "@/agents/config/session";
+import { storeJev, storeJevOff, storedJevModel } from "@/agents/config/session";
 import type { AgentModelName } from "@/agents/data/brainClient";
 import type { AgentHost } from "@/agents/host/AgentHost";
 import type { LevelGeometry } from "@/agents/world/levels";
@@ -219,7 +219,7 @@ function jevKey(args: string[], context: CommandContext): CommandResult {
     };
   }
   if (key.toLowerCase() === "off") {
-    storeJev("", "");
+    storeJevOff();
     context.host.configureJev("", "");
     return { ok: true, lines: ["Jev off: agents fall back to simple rules."] };
   }
