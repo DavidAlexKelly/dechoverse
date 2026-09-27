@@ -244,12 +244,12 @@ Separate queries rather than a flag on one, for the same reason as BGWS: **the b
 | `model` value | Model | How it's called in TS v1 | Response shape |
 |---|---|---|---|
 | `"claude-haiku-4-5"` | Claude 4.5 Haiku | `createGenericChatCompletion` | `response.completion` |
-| `"gpt-5-mini"` | GPT-5 mini (or GPT-4.1 mini) | `createChatCompletion` | `response.choices[0].message.content` |
-| `"gemini-2-5-flash"` | Gemini 2.5 Flash (or 3 Flash) | `createGenericChatCompletion` | `response.completion` |
+| `"gpt-5-4-mini"` | GPT-5.4 mini (or GPT-4.1 mini) | `createChatCompletion` | `response.choices[0].message.content` |
+| `"gemini-3-6-flash"` | Gemini 3.6 Flash (or 3 Flash) | `createGenericChatCompletion` | `response.completion` |
 
-- **Import names.** Add each model through **Resource Imports → Models** and copy the identifier from the sidebar snippet. The names are not documented anywhere I could reach. By analogy with `AnthropicClaude_4_6_Sonnet` / `GPT_5_2` they are probably `AnthropicClaude_4_5_Haiku`, `GPT_5_Mini` and `Gemini_2_5_Flash`, but check.
+- **Import names.** Add each model through **Resource Imports → Models** and copy the identifier from the sidebar snippet. The names are not documented anywhere I could reach. By analogy with `AnthropicClaude_4_6_Sonnet` / `GPT_5_2` they are probably `AnthropicClaude_4_5_Haiku`, `GPT_5_4_mini` and `Gemini_3_6_Flash`, but check.
 - **No JSON-schema mode.** Gemini in Foundry doesn't support JSON-schema response formats, which is another reason the app does all parsing and validation. Every brief ends "Reply with JSON only. No prose, no code fences."
-- **GPT-5 mini is a reasoning model.** As with `MAX_TOKENS_JEV["gpt-5-2"]`, give it a much larger `maxTokens` so hidden reasoning doesn't truncate the JSON.
+- **GPT-5.4 mini is a reasoning model.** As with `MAX_TOKENS_JEV["gpt-5-2"]`, give it a much larger `maxTokens` so hidden reasoning doesn't truncate the JSON.
 - **An empty reply is returned empty.** This is the BGWS lesson: a failed call must never look like "the model decided to say nothing". The app counts an empty string as unanswered and the agent just carries on.
 
 **Skeleton** (the real file is `llmfunctions/dechoAgentFunctions.ts`; same style as the BGWS file):
@@ -259,20 +259,20 @@ import { Query, UserFacingError } from "@foundry/functions-api";
 // Added through Resource Imports; copy the exact identifiers from the sidebar.
 import {
   AnthropicClaude_4_5_Haiku,
-  GPT_5_Mini,
-  Gemini_2_5_Flash,
+  GPT_5_4_mini,
+  Gemini_3_6_Flash,
 } from "@foundry/models-api/language-models";
 
-export type AgentModel = "claude-haiku-4-5" | "gpt-5-mini" | "gemini-2-5-flash";
-const MODELS: AgentModel[] = ["claude-haiku-4-5", "gpt-5-mini", "gemini-2-5-flash"];
+export type AgentModel = "claude-haiku-4-5" | "gpt-5-4-mini" | "gemini-3-6-flash";
+const MODELS: AgentModel[] = ["claude-haiku-4-5", "gpt-5-4-mini", "gemini-3-6-flash"];
 
 /** A spoken line is at most 200 characters (MAX_MESSAGE_LENGTH in speech.ts). */
 const MAX_TOKENS_REPLY: Record<AgentModel, number> = {
-  "claude-haiku-4-5": 200, "gpt-5-mini": 2000, "gemini-2-5-flash": 400 };
+  "claude-haiku-4-5": 200, "gpt-5-4-mini": 2000, "gemini-3-6-flash": 400 };
 const MAX_TOKENS_PLAN: Record<AgentModel, number> = {
-  "claude-haiku-4-5": 2500, "gpt-5-mini": 8000, "gemini-2-5-flash": 4000 };
+  "claude-haiku-4-5": 2500, "gpt-5-4-mini": 8000, "gemini-3-6-flash": 4000 };
 const MAX_TOKENS_DECIDE: Record<AgentModel, number> = {
-  "claude-haiku-4-5": 200, "gpt-5-mini": 2000, "gemini-2-5-flash": 400 };
+  "claude-haiku-4-5": 200, "gpt-5-4-mini": 2000, "gemini-3-6-flash": 400 };
 
 const REPLY_BRIEF = [
   "You are a resident of Dechoverse, a shared 3D world where people walk, talk and build with cubes.",
@@ -323,11 +323,11 @@ export class DechoAgentFunctions {
                     limits: Record<AgentModel, number>): Promise<string> {
     const params = { temperature, maxTokens: limits[chosen] };
     const messages = [{ role: "USER" as const, contents: [{ text: content }] }];
-    if (chosen === "gpt-5-mini") {
-      const r = await GPT_5_Mini.createChatCompletion({ params, messages });
+    if (chosen === "gpt-5-4-mini") {
+      const r = await GPT_5_4_mini.createChatCompletion({ params, messages });
       return r.choices.length > 0 ? r.choices[0].message.content ?? "" : "";
     }
-    const model = chosen === "claude-haiku-4-5" ? AnthropicClaude_4_5_Haiku : Gemini_2_5_Flash;
+    const model = chosen === "claude-haiku-4-5" ? AnthropicClaude_4_5_Haiku : Gemini_3_6_Flash;
     const r = await model.createGenericChatCompletion({ params, messages });
     return r.completion ?? "";
   }
@@ -366,7 +366,7 @@ import { describeError } from "@/foundry/errors";
 import type { ModelCall } from "@/agents/brain/prompts";
 
 /** Models the published queries accept. Kept in step with dechoAgentModels by hand. */
-export const AGENT_MODELS = ["claude-haiku-4-5", "gpt-5-mini", "gemini-2-5-flash"] as const;
+export const AGENT_MODELS = ["claude-haiku-4-5", "gpt-5-4-mini", "gemini-3-6-flash"] as const;
 export type AgentModelName = (typeof AGENT_MODELS)[number];
 
 export type BrainQueryKind = "reply" | "plan" | "decide";
@@ -567,7 +567,7 @@ Until Tier 3, personas live in `agents/config/personas.ts` and memories live in 
 
 | Object type | Backing | Key properties | Edited by |
 |---|---|---|---|
-| `DechoAgent` | Dataset | `agentId`, `displayName`, `persona`, `model` (`claude-haiku-4-5` / `gpt-5-mini` / `gemini-2-5-flash`), `levelKey`, `enabled`, `muted`, `currentGoal`, `color`, `hat` | Actions `spawn-agent`, `set-agent-enabled`, `mute-agent`, `set-agent-goal` |
+| `DechoAgent` | Dataset | `agentId`, `displayName`, `persona`, `model` (`claude-haiku-4-5` / `gpt-5-4-mini` / `gemini-3-6-flash`), `levelKey`, `enabled`, `muted`, `currentGoal`, `color`, `hat` | Actions `spawn-agent`, `set-agent-enabled`, `mute-agent`, `set-agent-goal` |
 | `DechoAgentMemory` | Dataset | `memoryId`, `agentId`, `text`, `aboutUser`, `createdAt` | Action `remember-fact`, and the hourly reflection job |
 
 - **Actions:**

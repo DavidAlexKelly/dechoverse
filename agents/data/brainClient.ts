@@ -18,7 +18,7 @@ import { ontologyClient } from "@/foundry/client";
 import { describeApiError } from "@/foundry/errors";
 
 /** Models the published queries accept. Kept in step with llmfunctions by hand. */
-export const AGENT_MODELS = ["claude-haiku-4-5", "gpt-5-mini", "gemini-2-5-flash"] as const;
+export const AGENT_MODELS = ["claude-haiku-4-5", "gpt-5-4-mini", "gemini-3-6-flash"] as const;
 
 export type AgentModelName = (typeof AGENT_MODELS)[number];
 
@@ -114,6 +114,15 @@ export function foundryModelCall(
       };
       result = await execute.executeFunction({ prompt, model, persona });
     } catch (error) {
+      // The function threw a UserFacingError (HTTP 409): its own words, in
+      // parameters.message, are the whole story — show them, not the status.
+      const detail = error as { errorName?: unknown; parameters?: { message?: unknown } };
+      if (detail?.errorName === "QueryEncounteredUserFacingError") {
+        throw new BrainCallError(
+          `${name} refused: ${String(detail.parameters?.message ?? "no message")}`,
+          false,
+        );
+      }
       const denied = looksLikePermissionProblem(error);
       throw new BrainCallError(
         denied

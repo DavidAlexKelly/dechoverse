@@ -42,12 +42,12 @@ const MODEL_ALIASES: Record<string, AgentModelName> = {
   claude: "claude-haiku-4-5",
   haiku: "claude-haiku-4-5",
   "claude-haiku-4-5": "claude-haiku-4-5",
-  gpt: "gpt-5-mini",
-  openai: "gpt-5-mini",
-  "gpt-5-mini": "gpt-5-mini",
-  gemini: "gemini-2-5-flash",
-  flash: "gemini-2-5-flash",
-  "gemini-2-5-flash": "gemini-2-5-flash",
+  gpt: "gpt-5-4-mini",
+  openai: "gpt-5-4-mini",
+  "gpt-5-4-mini": "gpt-5-4-mini",
+  gemini: "gemini-3-6-flash",
+  flash: "gemini-3-6-flash",
+  "gemini-3-6-flash": "gemini-3-6-flash",
 };
 
 const COLOURS = ["#00d2ff", "#ff5c8a", "#ffd166", "#00ffb2", "#7a5cff", "#ff8f4d", "#5ce1e6", "#b0ff6b"];
