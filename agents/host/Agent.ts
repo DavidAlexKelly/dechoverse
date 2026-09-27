@@ -37,7 +37,7 @@ import {
   decide,
   initialMind,
 } from "@/agents/brain/stateMachine";
-import { agentSessionId, agentUserId, plainName } from "@/agents/config/identity";
+import { agentSessionId, agentUserId, mentionsName, plainName } from "@/agents/config/identity";
 import type { Persona } from "@/agents/config/personas";
 import {
   type AgentModelName,
@@ -53,6 +53,7 @@ import type { EyePose } from "@/agents/body/Body";
 import { HEARING_RADIUS, SHOUT_RADIUS } from "@/game/state/useChat";
 import { bubbleDurationMs, isShout } from "@/game/state/speech";
 import { cellKey as voxelKey, cellOf, hasCube } from "@/game/world/voxels";
+import { randomFloat } from "@/shared/random";
 
 /**
  * One AI player: a body in a room, a mind that decides, and the calls that
@@ -113,9 +114,15 @@ export interface AgentSnapshot {
 
 // ── Cadence and budgets ──────────────────────────────────────────────────
 /** Jev is asked this often while something is going on… */
-const THINK_ACTIVE_MS = 900;
+const THINK_ACTIVE_MS = 2000;
 /** …and this often while idle. A chat or an approaching player wakes it at once. */
-const THINK_IDLE_MS = 2500;
+const THINK_IDLE_MS = 5000;
+/**
+ * Jev is only asked again when the situation has changed — someone spoke,
+ * came or went, the mode or the build moved on — or after this long, so a
+ * slow drift (a conversation going quiet) is still noticed.
+ */
+const JEV_HEARTBEAT_MS = 12000;
 /** With no Jev at all, the heuristics still run on this beat. */
 const THINK_WITHOUT_JEV_MS = 1000;
 /** Per agent, from the plan's budget table. */
@@ -202,6 +209,11 @@ export class Agent {
   private wake = false;
   private nearbyCount = 0;
   private reflexes: Reflexes | null = null;
+  /** What Jev last saw, reduced to what matters, and when. */
+  private jevSignature = "";
+  private jevAskedAt = -Infinity;
+  /** Set by anything that must be looked at now, whatever the signature says. */
+  private jevForced = true;
   private lastRepathAt = 0;
 
   private brainBusy: BrainQueryKind | null = null;
@@ -322,7 +334,7 @@ export class Agent {
       sessionId: message.sessionId,
       userId: message.userId,
       isAgent: message.isAgent,
-      mentionsName: message.text.toLowerCase().includes(this.name.toLowerCase()),
+      mentionsName: mentionsName(message.text, this.name),
       receivedAt: now,
       message,
     });
@@ -356,6 +368,9 @@ export class Agent {
     if (!this.wake && now < this.nextThinkAt) {
       return;
     }
+    if (this.wake) {
+      this.jevForced = true;
+    }
     this.wake = false;
     this.thinking = true;
     if (this.planWanted != null && this.canAsk("plan")) {
@@ -367,13 +382,20 @@ export class Agent {
       this.expirePending(now);
       const jev = this.services.jev();
       let reflexes: Reflexes | null = null;
+      let unchanged = false;
       if (jev != null) {
-        reflexes = await this.askJev(jev, now);
+        const answer = await this.askJev(jev, now);
+        unchanged = answer === "unchanged";
+        reflexes = answer === "unchanged" ? null : answer;
       }
-      if (reflexes == null) {
+      if (reflexes == null && !unchanged) {
         reflexes = this.heuristicReflexes();
       }
-      this.reflexes = reflexes;
+      if (reflexes != null) {
+        this.reflexes = reflexes;
+      }
+      // Nothing new from Jev still runs the state machine: timeouts,
+      // boredom and builds move on with the clock, not with Jev.
       this.decideAndAct(performance.now(), reflexes);
       this.nextThinkAt =
         performance.now() +
@@ -412,7 +434,26 @@ export class Agent {
     return this.pendingMessages[this.pendingMessages.length - 1] ?? null;
   }
 
-  private async askJev(jev: JevClient, now: number): Promise<Reflexes | null> {
+  /**
+   * The Jev state reduced to what should prompt a new answer: who is where
+   * (to within a few metres), what was said, the mode, the goal, the build.
+   * Ages and exact distances are left out — they change every second and
+   * would make every tick look new.
+   */
+  private static signatureOf(summary: unknown): string {
+    const volatile = new Set(["ageS", "behaviourForS", "lastSpokeS", "lastHeardS", "stalledS"]);
+    return JSON.stringify(summary, (key, value: unknown) => {
+      if (volatile.has(key)) {
+        return undefined;
+      }
+      if (key === "distanceM" && typeof value === "number") {
+        return Math.round(value / 4);
+      }
+      return value;
+    });
+  }
+
+  private async askJev(jev: JevClient, now: number): Promise<Reflexes | null | "unchanged"> {
     const pending = this.newestPending();
     const partnerPlayer = this.partnerPlayer();
     const summary = summarise({
@@ -448,6 +489,18 @@ export class Agent {
       building: this.project != null,
     });
 
+    const signature = Agent.signatureOf({ summary, questions: Object.keys(questions) });
+    if (
+      !this.jevForced &&
+      signature === this.jevSignature &&
+      now - this.jevAskedAt < JEV_HEARTBEAT_MS
+    ) {
+      return "unchanged";
+    }
+    this.jevForced = false;
+    this.jevSignature = signature;
+    this.jevAskedAt = now;
+
     try {
       const result = await jev.ask(summary, questions, { user: this.sessionId });
       this.stats.jevCalls++;
@@ -459,6 +512,8 @@ export class Agent {
       return reflexes;
     } catch (error) {
       this.stats.jevFailures++;
+      // Try again next tick rather than wait out the heartbeat.
+      this.jevSignature = "";
       const message = error instanceof Error ? error.message : String(error);
       this.stats.jevError = message;
       logJevFailure(this.name, message, error instanceof JevError ? error.status : null);
@@ -481,10 +536,10 @@ export class Agent {
       const distance = this.distanceToMessage(pending.message);
       const text = pending.message.text.toLowerCase();
       // Naming someone else who is here means it is for them, however close I stand.
-      const namesSomeoneElse = this.others().some((player) => {
-        const name = plainName(player.userId).toLowerCase();
-        return player.sessionId !== pending.sessionId && name.length > 1 && text.includes(name);
-      });
+      const namesSomeoneElse = this.others().some(
+        (player) =>
+          player.sessionId !== pending.sessionId && mentionsName(text, plainName(player.userId)),
+      );
       addressed = pending.mentionsName
         ? 0.95
         : namesSomeoneElse
@@ -496,7 +551,7 @@ export class Agent {
     return { ...NO_REFLEXES, addressedToMe: addressed, worthReplying: pending?.isAgent ? 0 : null };
   }
 
-  private decideAndAct(now: number, reflexes: Reflexes): void {
+  private decideAndAct(now: number, reflexes: Reflexes | null): void {
     const before = this.mind.mode;
     const situation = this.situation(now, reflexes);
     const { state, intents } = decide(this.mind, situation);
@@ -611,8 +666,11 @@ export class Agent {
     const geometry = this.view.geometry;
     let best: { x: number; z: number; score: number } | null = null;
     for (let attempt = 0; attempt < 8; attempt++) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = geometry.halfSize != null ? 3 + Math.random() * (geometry.halfSize - 4) : 12 + Math.random() * 28;
+      const angle = randomFloat() * Math.PI * 2;
+      const radius =
+        geometry.halfSize != null
+          ? 3 + randomFloat() * (geometry.halfSize - 4)
+          : 12 + randomFloat() * 28;
       const x = this.body.x + Math.cos(angle) * radius;
       const z = this.body.z + Math.sin(angle) * radius;
       if (geometry.halfSize != null && (Math.abs(x) > geometry.halfSize - 2 || Math.abs(z) > geometry.halfSize - 2)) {

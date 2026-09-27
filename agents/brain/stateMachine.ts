@@ -182,11 +182,14 @@ export function decide(
       ? Math.max(reflexes?.addressedToMe ?? 0, 0.9)
       : reflexes?.addressedToMe ?? null;
 
-    // Another AI talking to me — by name, or as my conversation partner — is
-    // a conversation, and gets an answer. Ambient AI chatter only draws one
-    // in when Jev says it is worth it. Either way a thread is capped, so two
-    // agents cannot talk forever; a human is never subject to the cap.
-    const agentEngaged = pending.isAgent && (pending.mentionsName || fromPartner);
+    // Another AI talking to me — by name, as my conversation partner, or as
+    // Jev reads it — is a conversation, and gets an answer. Ambient AI
+    // chatter only draws one in when Jev says it is worth it. Either way a
+    // thread is capped, so two agents cannot talk forever; a human is never
+    // subject to the cap.
+    const agentEngaged =
+      pending.isAgent &&
+      (pending.mentionsName || fromPartner || (reflexes?.addressedToMe ?? 0) >= ADDRESSED);
     const agentDeclined =
       pending.isAgent &&
       (situation.agentTurns >= MAX_AGENT_TURNS ||

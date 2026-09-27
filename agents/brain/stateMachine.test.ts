@@ -163,13 +163,21 @@ describe("agents talking to agents", () => {
 
   const fromAgent = message({ sessionId: "agent:pixel:1", userId: "Pixel 🤖", isAgent: true });
 
-  test("only when Jev thinks it is worth it", () => {
+  test("ambient AI chatter not aimed at me: only when Jev thinks it is worth it", () => {
     const { intents } = decide(
       mind(),
-      situation({ pending: fromAgent, reflexes: reflexes({ addressedToMe: 0.95, worthReplying: 0.5 }) }),
+      situation({ pending: fromAgent, reflexes: reflexes({ addressedToMe: 0.3, worthReplying: 0.5 }) }),
     );
     expect(types(intents)).toEqual(expect.arrayContaining(["ignore"]));
     expect(types(intents)).not.toContain("reply");
+  });
+
+  test("an AI Jev reads as talking to me gets an answer", () => {
+    const { intents } = decide(
+      mind(),
+      situation({ pending: fromAgent, reflexes: reflexes({ addressedToMe: 0.95, worthReplying: 0.2 }) }),
+    );
+    expect(types(intents)).toContain("reply");
   });
 
   test("and never past the per-minute turn limit", () => {

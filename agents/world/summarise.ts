@@ -1,5 +1,5 @@
 import type { Mode } from "@/agents/brain/stateMachine";
-import { plainName } from "@/agents/config/identity";
+import { mentionsName, plainName } from "@/agents/config/identity";
 import type { HeardMessage, WorldPlayer } from "@/agents/world/WorldView";
 import type { Cube } from "@/game/domain/types";
 
@@ -122,9 +122,7 @@ export function summarise(input: SummaryInput): Record<string, unknown> {
             text: input.pending.message.text,
             ageS: round((now - input.pending.message.receivedAt) / 1000, 0),
             distanceM: input.pending.distance == null ? null : round(input.pending.distance),
-            mentionsMyName: input.pending.message.text
-              .toLowerCase()
-              .includes(self.name.toLowerCase()),
+            mentionsMyName: mentionsName(input.pending.message.text, self.name),
           },
     conversation:
       input.partner == null
