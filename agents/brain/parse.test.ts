@@ -29,8 +29,24 @@ describe("extractJsonObject", () => {
 describe("parseReply", () => {
   test("accepts a reply to an offered message", () => {
     expect(parseReply('{"say":"Hello Dana!","replyTo":"m2","remember":null}', ["m1", "m2"])).toEqual(
-      { say: "Hello Dana!", replyTo: "m2", remember: null },
+      { say: "Hello Dana!", replyTo: "m2", remember: null, action: "none", build: null },
     );
+  });
+
+  test("carries an offered action, and what to build", () => {
+    const reply = parseReply(
+      '{"say":"On it!","replyTo":"m1","action":"build","build":"a stone bridge"}',
+      ["m1"],
+      ["none", "build", "follow"],
+    );
+    expect(reply?.action).toBe("build");
+    expect(reply?.build).toBe("a stone bridge");
+  });
+
+  test("an action that was not offered is ignored, but the words still stand", () => {
+    const reply = parseReply('{"say":"Sure","replyTo":"m1","action":"build"}', ["m1"], ["none", "follow"]);
+    expect(reply?.say).toBe("Sure");
+    expect(reply?.action).toBe("none");
   });
 
   test("rejects a reply to a message that was never offered", () => {

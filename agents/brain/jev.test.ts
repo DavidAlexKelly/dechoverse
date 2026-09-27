@@ -108,7 +108,6 @@ describe("questionsFor", () => {
         "addressed_to_me",
         "worth_replying",
         "conversation_over",
-        "wants_collaboration",
         "stuck",
       ]),
     );

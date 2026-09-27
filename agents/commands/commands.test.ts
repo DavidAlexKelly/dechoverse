@@ -121,7 +121,9 @@ describe("other commands", () => {
   test("agents lists, removeagent removes", () => {
     const host = fakeHost();
     runCommand("createagent gemini Dave", context(host));
-    expect(runCommand("agents", context(host)).lines[0]).toContain("Dave 🤖");
+    const listed = runCommand("agents", context(host)).lines;
+    expect(listed[0]).toContain("Jev: off");
+    expect(listed[1]).toContain("Dave 🤖");
     expect(runCommand("removeagent dave", context(host)).ok).toBe(true);
     expect(host.spawned).toHaveLength(0);
     expect(runCommand("removeagent dave", context(host)).ok).toBe(false);

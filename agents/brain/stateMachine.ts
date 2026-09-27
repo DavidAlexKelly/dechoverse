@@ -26,7 +26,6 @@ export interface Reflexes {
   /** 0 ignorable … 4 must respond now. */
   urgency: number | null;
   conversationOver: number | null;
-  wantsCollaboration: number | null;
   /** Another agent's message deserves a reply at all. */
   worthReplying: number | null;
   stuck: number | null;
@@ -37,7 +36,6 @@ export const NO_REFLEXES: Reflexes = {
   nextState: null,
   urgency: null,
   conversationOver: null,
-  wantsCollaboration: null,
   worthReplying: null,
   stuck: null,
 };
@@ -69,6 +67,11 @@ export interface MindState {
   lastHeardAt: number;
   /** When a new goal was last asked for, so it is not asked every tick. */
   goalRequestedAt: number;
+  /**
+   * Asked to come along: keep with the partner however quiet it gets, until
+   * told to stay or the partner walks out of earshot.
+   */
+  following: boolean;
 }
 
 export interface Situation {
@@ -129,7 +132,14 @@ export const GOAL_RETRY_MS = 60000;
 export const GREETING_DISTANCE = 12;
 
 export function initialMind(now: number): MindState {
-  return { mode: "IDLE", since: now, partner: null, lastHeardAt: 0, goalRequestedAt: -Infinity };
+  return {
+    mode: "IDLE",
+    since: now,
+    partner: null,
+    lastHeardAt: 0,
+    goalRequestedAt: -Infinity,
+    following: false,
+  };
 }
 
 function enter(state: MindState, mode: Mode, now: number): MindState {
@@ -183,7 +193,8 @@ export function decide(
         partner: { sessionId: pending.sessionId, userId: pending.userId },
         lastHeardAt: now,
       };
-      if (state.mode !== "SOCIAL") {
+      // Talking does not stop a build: answer over your shoulder and carry on.
+      if (state.mode !== "SOCIAL" && state.mode !== "BUILD") {
         state = enter(state, "REACTING", now);
       }
       intents.push({ type: "face", sessionId: pending.sessionId });
@@ -214,9 +225,14 @@ export function decide(
         situation.partnerDistance > EARSHOT;
       const quiet = now - state.lastHeardAt;
       const over =
-        (reflexes?.conversationOver ?? 0) > 0.7 && quiet > 8000 && settled;
-      if (gone || over || quiet > CONVERSATION_TIMEOUT_MS) {
-        state = { ...enter(state, afterwards(situation, reflexes), now), partner: null };
+        !state.following && (reflexes?.conversationOver ?? 0) > 0.7 && quiet > 8000 && settled;
+      const timedOut = !state.following && quiet > CONVERSATION_TIMEOUT_MS;
+      if (gone || over || timedOut) {
+        state = {
+          ...enter(state, afterwards(situation, reflexes), now),
+          partner: null,
+          following: false,
+        };
         break;
       }
       if (situation.partnerDistance != null && situation.partnerDistance > TALKING_DISTANCE) {
@@ -224,14 +240,8 @@ export function decide(
       } else {
         intents.push({ type: "face", sessionId: partner.sessionId });
       }
-      if (
-        (reflexes?.wantsCollaboration ?? 0) > 0.75 &&
-        !situation.hasPlan &&
-        now - state.goalRequestedAt > GOAL_RETRY_MS
-      ) {
-        state = { ...state, goalRequestedAt: now };
-        intents.push({ type: "chooseGoal" });
-      }
+      // Building on request goes through the reply's "build" action; there is
+      // no separate "wants to build with me" reflex any more.
       break;
     }
 
@@ -245,14 +255,10 @@ export function decide(
         state = enter(state, "EXPLORE", now);
         break;
       }
-      // An unfinished plan is only interrupted by people: wandering off or
-      // resting mid-build is what `stuck` is for, not a passing suggestion.
-      if (reflexes?.nextState?.choice === "SOCIAL") {
-        state = switchByReflex(state, situation, settled, intents);
-      }
-      if (state.mode === "BUILD") {
-        intents.push({ type: "build" });
-      }
+      // An unfinished plan is not dropped on a passing suggestion. People are
+      // answered while building (above), and a build ends when it is done,
+      // stuck, or someone asks for it to stop.
+      intents.push({ type: "build" });
       break;
     }
 

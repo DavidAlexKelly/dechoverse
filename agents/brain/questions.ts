@@ -74,11 +74,6 @@ export function questionsFor(context: QuestionContext): JevQuestions {
       instructions:
         "The conversation between the agent and its partner has wound down: goodbyes, a long silence, or the partner has moved on to something else.",
     };
-    questions.wants_collaboration = {
-      type: "noul",
-      instructions:
-        "The partner has asked the agent to build, help or make something together, and the agent has not yet agreed on what.",
-    };
   }
 
   if (context.building) {
@@ -106,7 +101,6 @@ export function readReflexes(answers: Record<string, JevAnswer>): Reflexes {
         : null,
     urgency: score(answers, "urgency"),
     conversationOver: noul(answers, "conversation_over"),
-    wantsCollaboration: noul(answers, "wants_collaboration"),
     worthReplying: noul(answers, "worth_replying"),
     stuck: noul(answers, "stuck"),
   };

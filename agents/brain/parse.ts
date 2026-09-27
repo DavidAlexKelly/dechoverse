@@ -1,4 +1,11 @@
-import type { BuildSite } from "@/agents/brain/prompts";
+import {
+  type BlueprintCube,
+  buildable,
+  cubesFromList,
+  expandParts,
+  readPalette,
+} from "@/agents/build/blueprint";
+import type { BuildSite, ReplyAction } from "@/agents/brain/prompts";
 
 /**
  * Reading what the brain queries returned.
@@ -61,9 +68,17 @@ export interface ParsedReply {
   /** The key answered, or "none" for an unprompted greeting. */
   replyTo: string;
   remember: string | null;
+  /** What to do as well as speak; "none" when missing or not on offer. */
+  action: ReplyAction;
+  /** For "build": what to build, in the model's words. */
+  build: string | null;
 }
 
-export function parseReply(text: string, allowedKeys: string[]): ParsedReply | null {
+export function parseReply(
+  text: string,
+  allowedKeys: string[],
+  allowedActions: ReplyAction[] = ["none"],
+): ParsedReply | null {
   const json = extractJsonObject(text);
   if (json == null || typeof json.say !== "string") {
     return null;
@@ -81,7 +96,14 @@ export function parseReply(text: string, allowedKeys: string[]): ParsedReply | n
     typeof json.remember === "string" && json.remember.trim() !== ""
       ? json.remember.trim().slice(0, 200)
       : null;
-  return { say, replyTo, remember };
+  // An action that was not offered is ignored, not obeyed: the words still stand.
+  const action =
+    typeof json.action === "string" && (allowedActions as string[]).includes(json.action)
+      ? (json.action as ReplyAction)
+      : "none";
+  const build =
+    typeof json.build === "string" && json.build.trim() !== "" ? json.build.trim().slice(0, 120) : null;
+  return { say, replyTo, remember, action, build };
 }
 
 export interface ParsedDecision {
@@ -101,35 +123,48 @@ export function parseDecide(text: string, allowedKeys: string[]): ParsedDecision
   return { choice, why: typeof json.why === "string" ? json.why.slice(0, 300) : "" };
 }
 
-/** One cube of a plan, in world cell coordinates, with its colour. */
-export interface PlannedCube {
-  /** Cell offsets within the site; y is layers above that column's ground. */
-  dx: number;
-  dy: number;
-  dz: number;
-  color: string;
-}
+/** One cube of a plan: cell offsets within the site, and its colour. */
+export type PlannedCube = BlueprintCube;
 
 export interface BuildPlan {
   title: string;
   site: BuildSite;
-  /** Bottom-up, in the order they should be placed. */
+  palette: string[];
+  /** In the order they should be placed: every one touches one placed before. */
   cubes: PlannedCube[];
   /** How many the model proposed that were thrown away, for the console. */
   discarded: number;
 }
 
-const HEX = /^#[0-9a-fA-F]{6}$/;
-/** Taller than this is a model getting carried away. */
-const MAX_LAYERS = 12;
+/** Cubes from a reply's "parts" (shapes) and/or "cubes" (the flat legacy list). */
+function proposedCubes(json: Record<string, unknown>, palette: string[]): {
+  cubes: Map<string, BlueprintCube>;
+  cleared: Set<string>;
+} {
+  const cubes = Array.isArray(json.cubes) ? cubesFromList(json.cubes, palette) : new Map();
+  const cleared = new Set<string>();
+  if (Array.isArray(json.parts)) {
+    const expansion = expandParts(json.parts, palette);
+    for (const [key, cube] of expansion.cubes) {
+      cubes.set(key, cube);
+    }
+    for (const key of expansion.cleared) {
+      if (!expansion.cubes.has(key)) {
+        cubes.delete(key);
+        cleared.add(key);
+      }
+    }
+  }
+  return { cubes, cleared };
+}
 
 /**
- * A plan, with everything invalid removed.
+ * A plan, with everything that cannot be built removed.
  *
- * Kept: cubes inside the chosen site, within MAX_LAYERS, with a real palette
- * colour, resting on the ground or on another kept cube. Support is checked
- * after dropping the rest, so a column whose base was invalid loses
- * everything above it too rather than leaving it floating.
+ * The model picks one of the offered sites by key and describes the building
+ * as shapes ("parts"), a cube list, or both. Kept: cubes inside the site,
+ * below the layer limit, connected to the ground through other cubes, up to
+ * the cube limit — see blueprint.buildable.
  */
 export function parsePlan(text: string, sites: BuildSite[], maxCubes: number): BuildPlan | null {
   const json = extractJsonObject(text);
@@ -140,58 +175,72 @@ export function parsePlan(text: string, sites: BuildSite[], maxCubes: number): B
   if (site == null) {
     return null;
   }
-  const palette = Array.isArray(json.palette)
-    ? json.palette.filter((color): color is string => typeof color === "string" && HEX.test(color))
-    : [];
-  if (palette.length === 0 || !Array.isArray(json.cubes)) {
+  const palette = readPalette(json.palette);
+  if (palette.length === 0) {
     return null;
   }
-
-  const proposed = json.cubes.length;
-  const occupied = new Set<string>();
-  const candidates: PlannedCube[] = [];
-  for (const entry of json.cubes) {
-    if (!Array.isArray(entry) || entry.length < 4) {
-      continue;
-    }
-    const [dx, dy, dz, colorIndex] = entry.map(Number);
-    if (![dx, dy, dz, colorIndex].every(Number.isInteger)) {
-      continue;
-    }
-    if (dx < 0 || dz < 0 || dx >= site.size || dz >= site.size || dy < 0 || dy >= MAX_LAYERS) {
-      continue;
-    }
-    const color = palette[colorIndex];
-    if (color == null) {
-      continue;
-    }
-    const key = `${dx},${dy},${dz}`;
-    if (occupied.has(key)) {
-      continue;
-    }
-    occupied.add(key);
-    candidates.push({ dx, dy, dz, color });
-  }
-
-  // Keep only what is supported, working upwards so support can chain.
-  candidates.sort((a, b) => a.dy - b.dy);
-  const kept = new Set<string>();
-  const cubes: PlannedCube[] = [];
-  for (const cube of candidates) {
-    const supported = cube.dy === 0 || kept.has(`${cube.dx},${cube.dy - 1},${cube.dz}`);
-    if (!supported || cubes.length >= maxCubes) {
-      continue;
-    }
-    kept.add(`${cube.dx},${cube.dy},${cube.dz}`);
-    cubes.push(cube);
-  }
+  const { cubes: proposed } = proposedCubes(json, palette);
+  const { cubes, dropped } = buildable(proposed.values(), site.size, maxCubes);
   if (cubes.length === 0) {
     return null;
   }
-
   const title =
     typeof json.title === "string" && json.title.trim() !== ""
       ? json.title.trim().slice(0, 80)
       : "something";
-  return { title, site, cubes, discarded: proposed - cubes.length };
+  return { title, site, palette, cubes, discarded: dropped };
+}
+
+export interface ParsedReview {
+  done: boolean;
+  /** More cubes, ordered for building on top of what stands. */
+  add: PlannedCube[];
+  /**
+   * Cells to empty: queued cubes are dropped, and placed ones erased — only
+   * ever this build's own; the caller checks.
+   */
+  remove: string[];
+  palette: string[];
+  note: string;
+  discarded: number;
+}
+
+/**
+ * The model's look at a build in progress: carry on (with more parts), take
+ * something out (clear parts), or call it done.
+ *
+ * `standing` is what is on the site now, keyed by cell, and `queued` what
+ * the plan will still add; new cubes may rest on either, since they are
+ * built after the queue. Clears apply to both.
+ */
+export function parseReview(
+  text: string,
+  size: number,
+  palette: string[],
+  standing: Set<string>,
+  maxCubes: number,
+  queued: Set<string> = new Set(),
+): ParsedReview | null {
+  const json = extractJsonObject(text);
+  if (json == null) {
+    return null;
+  }
+  // New colours may be added; indices past the old palette refer to them.
+  const extra = readPalette(json.palette).filter((color) => !palette.includes(color));
+  const fullPalette = [...palette, ...extra].slice(0, 6);
+  const { cubes: proposed, cleared } = proposedCubes(json, fullPalette);
+  const remove = [...cleared].filter((key) => standing.has(key) || queued.has(key));
+  const remaining = new Set(
+    [...standing, ...queued].filter((key) => !cleared.has(key)),
+  );
+  const { cubes, dropped } = buildable(proposed.values(), size, maxCubes, remaining);
+  const done = json.status === "done";
+  return {
+    done,
+    add: done ? [] : cubes,
+    remove,
+    palette: fullPalette,
+    note: typeof json.note === "string" ? json.note.slice(0, 200) : "",
+    discarded: done ? 0 : dropped,
+  };
 }

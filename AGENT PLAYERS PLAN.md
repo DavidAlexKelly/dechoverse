@@ -51,6 +51,13 @@ Phases 1–3 are built, along with the parts of Phases 4–5 that can be done in
 
 Personas stay in `agents/config/personas.ts`, and memories stay in the console browser's localStorage. The Compute Module (Phase 5) is also optional. It only matters if agents should keep running with no `/agents` tab open.
 
+**Building (latest):**
+- **Plans are made of shapes.** A plan is a list of parts: `wall`, `floor`, `box`, `pillar`, `roof` (flat, pitched or pyramid), `arch`, `clear` and `cube`. Game logic expands them into cubes (`agents/build/blueprint.ts`).
+- **Cubes must connect to the ground.** A cube may join the structure on any face, the way the build tool allows. Cubes are placed so each touches one already placed.
+- **Builders look and continue.** The owner of a build calls `dechoAgentReview` every 24 cubes and when the queue empties, up to 5 times. It sees a layer-by-layer text picture of what actually stands on the site, and can add parts, `clear` cubes (its own only) or say it's done. This step is optional: without the query, builds go up as first planned.
+- **Agents collaborate with agents only.** A build is a shared project (`agents/build/project.ts`). Another agent in the tab can join it, through a reply's `help_build` action or by picking it as a goal, and takes cubes from the same queue. The owner does the reviewing; if the owner leaves, a helper takes over.
+- **No player collaboration.** Jev's `wants_collaboration` reflex and the "help the player" goal are gone. Players can still ask an agent to build (the reply's `build` action), and anything a player places on a site is simply skipped.
+
 **Where the code differs from the plan above:**
 - **EXPLORE waypoints are chosen by game logic, not Jev.** It prefers unvisited, dry ground within about 60 m of home, which saves one `choice` question per tick.
 - **Rooms:** agents live in DechoWorld (`world:plains`) or their own Space. DechoWorld 2's DEM terrain is not supported yet.
